@@ -1282,11 +1282,97 @@ def check():
     if not any(agent_results.values()):
         console.print("[dim]Tip: Install an AI assistant for the best experience[/dim]")
 
+def download_workspace_scripts(scripts_dir: Path, script_type: str = "sh", tracker: StepTracker = None, github_token: str = None) -> Tuple[int, list[str]]:
+    """Download workspace scripts from GitHub release.
+    
+    Args:
+        scripts_dir: Target directory for scripts (e.g., .specify/scripts/bash/)
+        script_type: Script variant - 'sh' for bash, 'ps' for powershell
+        tracker: Optional StepTracker for progress updates
+        github_token: Optional GitHub token for API requests
+        
+    Returns:
+        Tuple of (scripts_copied: int, errors: list[str])
+    """
+    # Script files to download for workspace mode
+    WORKSPACE_SCRIPTS = {
+        "sh": [
+            ("scripts/bash/common.sh", "bash/common.sh"),
+            ("scripts/bash/check-prerequisites.sh", "bash/check-prerequisites.sh"),
+            ("scripts/bash/create-new-feature.sh", "bash/create-new-feature.sh"),
+            ("scripts/bash/setup-plan.sh", "bash/setup-plan.sh"),
+            ("scripts/bash/update-agent-context.sh", "bash/update-agent-context.sh"),
+        ],
+        "ps": [
+            ("scripts/powershell/common.ps1", "powershell/common.ps1"),
+            ("scripts/powershell/check-prerequisites.ps1", "powershell/check-prerequisites.ps1"),
+            ("scripts/powershell/create-new-feature.ps1", "powershell/create-new-feature.ps1"),
+            ("scripts/powershell/setup-plan.ps1", "powershell/setup-plan.ps1"),
+            ("scripts/powershell/update-agent-context.ps1", "powershell/update-agent-context.ps1"),
+        ]
+    }
+    
+    scripts = WORKSPACE_SCRIPTS.get(script_type, WORKSPACE_SCRIPTS["sh"])
+    
+    # Try sources in order of preference:
+    # 1. Upstream github/spec-kit (public, always accessible)
+    # 2. Shakudo fork (may be private, requires auth)
+    SOURCES = [
+        ("github", "spec-kit", "main"),      # Upstream - public
+        ("Shakudo-io", "spec-kit", "main"),  # Fork - may need auth
+    ]
+    
+    copied = 0
+    errors = []
+    
+    for source_path, dest_rel_path in scripts:
+        dest_path = scripts_dir / dest_rel_path
+        downloaded = False
+        last_error = None
+        
+        try:
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            for owner, repo, branch in SOURCES:
+                raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{source_path}"
+                
+                response = client.get(
+                    raw_url,
+                    timeout=30,
+                    follow_redirects=True,
+                    headers=_github_auth_headers(github_token),
+                )
+                
+                if response.status_code == 200:
+                    with open(dest_path, 'wb') as f:
+                        f.write(response.content)
+                    copied += 1
+                    downloaded = True
+                    
+                    # Make shell scripts executable on POSIX
+                    if os.name != "nt" and dest_path.suffix == ".sh":
+                        os.chmod(dest_path, dest_path.stat().st_mode | 0o111)
+                    break
+                else:
+                    last_error = f"HTTP {response.status_code} from {owner}/{repo}"
+            
+            if not downloaded:
+                errors.append(f"{dest_rel_path}: {last_error or 'all sources failed'}")
+                
+        except Exception as e:
+            errors.append(f"{dest_rel_path}: {str(e)}")
+    
+    return copied, errors
+
+
 @app.command()
 def workspace(
     here: bool = typer.Option(False, "--here", help="Initialize workspace in the current directory"),
     force: bool = typer.Option(False, "--force", help="Force initialization even if workspace.yaml already exists"),
     detect_projects: bool = typer.Option(True, "--detect-projects/--no-detect-projects", help="Auto-detect projects in subdirectories"),
+    script_type: str = typer.Option(None, "--script", help="Script type to use: sh (bash) or ps (PowerShell)"),
+    skip_scripts: bool = typer.Option(False, "--skip-scripts", help="Skip downloading workspace scripts"),
+    github_token: str = typer.Option(None, "--github-token", help="GitHub token for API requests"),
 ):
     """
     Initialize a multi-repo workspace for Spec-Driven Development.
@@ -1295,12 +1381,15 @@ def workspace(
     1. Create .specify/workspace.yaml with workspace configuration
     2. Create .specify/memory/constitution.md for shared principles
     3. Create specs/ directory for centralized spec storage
-    4. Optionally detect existing projects (git repos or .specify directories)
+    4. Download workspace scripts (bash or PowerShell)
+    5. Optionally detect existing projects (git repos or .specify directories)
     
     Examples:
         specify workspace --here                    # Initialize in current directory
         specify workspace --here --force            # Overwrite existing workspace.yaml
         specify workspace --here --no-detect-projects  # Skip project detection
+        specify workspace --here --script ps        # Use PowerShell scripts
+        specify workspace --here --skip-scripts     # Don't download scripts
     """
     
     show_banner()
@@ -1333,6 +1422,15 @@ def workspace(
     ]
     console.print(Panel("\n".join(setup_lines), border_style="cyan", padding=(1, 2)))
     
+    # Determine script type (default based on OS)
+    if script_type:
+        if script_type not in SCRIPT_TYPE_CHOICES:
+            console.print(f"[red]Error:[/red] Invalid script type '{script_type}'. Choose from: {', '.join(SCRIPT_TYPE_CHOICES.keys())}")
+            raise typer.Exit(1)
+        selected_script = script_type
+    else:
+        selected_script = "ps" if os.name == "nt" else "sh"
+    
     tracker = StepTracker("Initialize Workspace")
     
     # Add steps
@@ -1340,11 +1438,15 @@ def workspace(
     tracker.add("workspace-yaml", "Create workspace.yaml")
     tracker.add("constitution", "Create shared constitution")
     tracker.add("specs-dir", "Create specs directory")
+    if not skip_scripts:
+        tracker.add("scripts", "Download workspace scripts")
     if detect_projects:
         tracker.add("detect", "Detect projects")
     tracker.add("final", "Finalize")
     
     detected_projects = []
+    scripts_copied = 0
+    script_errors = []
     
     with Live(tracker.render(), console=console, refresh_per_second=8, transient=True) as live:
         tracker.attach_refresh(lambda: live.update(tracker.render()))
@@ -1436,7 +1538,22 @@ constitution_location: workspace
                 gitkeep.touch()
             tracker.complete("specs-dir", "specs/")
             
-            # Step 5: Detect projects (optional)
+            # Step 5: Download workspace scripts (optional)
+            if not skip_scripts:
+                tracker.start("scripts")
+                scripts_copied, script_errors = download_workspace_scripts(
+                    scripts_dir,
+                    script_type=selected_script,
+                    tracker=tracker,
+                    github_token=github_token
+                )
+                script_variant = "bash" if selected_script == "sh" else "powershell"
+                if script_errors:
+                    tracker.error("scripts", f"{scripts_copied} copied, {len(script_errors)} failed")
+                else:
+                    tracker.complete("scripts", f"{scripts_copied} {script_variant} scripts")
+            
+            # Step 6: Detect projects (optional)
             if detect_projects:
                 tracker.start("detect")
                 exclude_patterns = {
@@ -1485,6 +1602,18 @@ constitution_location: workspace
         console.print()
         console.print(projects_panel)
     
+    # Show script download errors if any
+    if script_errors:
+        error_lines = ["Some scripts could not be downloaded:"] + [f"  • [red]{e}[/red]" for e in script_errors]
+        error_panel = Panel(
+            "\n".join(error_lines),
+            title="[yellow]Script Download Warnings[/yellow]",
+            border_style="yellow",
+            padding=(1, 2)
+        )
+        console.print()
+        console.print(error_panel)
+    
     # Show next steps
     next_steps = [
         "1. Edit [cyan].specify/workspace.yaml[/cyan] to customize workspace settings",
@@ -1496,6 +1625,12 @@ constitution_location: workspace
     
     if not detected_projects:
         next_steps.insert(0, "0. Add project directories (git repos) to this workspace")
+    
+    # Add AI agent discovery hint
+    script_variant = "bash" if selected_script == "sh" else "powershell"
+    if not skip_scripts and scripts_copied > 0:
+        next_steps.append("")
+        next_steps.append(f"[dim]AI agents can discover projects via: .specify/scripts/{script_variant}/check-prerequisites.sh --workspace-info[/dim]")
     
     steps_panel = Panel(
         "\n".join(next_steps),

@@ -7,6 +7,19 @@ All notable changes to the Specify CLI and templates are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.24] - 2026-01-16
+
+### Added
+
+- **Auto-download workspace scripts**: `specify workspace --here` now automatically downloads bash or PowerShell scripts from GitHub
+  - Downloads scripts from Shakudo fork (fallback to upstream github/spec-kit)
+  - Scripts are placed in `.specify/scripts/bash/` or `.specify/scripts/powershell/`
+  - Supports `--script sh|ps` flag to choose script variant
+  - Supports `--skip-scripts` flag to skip script download
+  - Supports `--github-token` flag for authenticated API requests
+  - Shell scripts are automatically made executable on POSIX systems
+  - Shows AI agent discovery hint in next steps
+
 ## [0.0.23] - 2026-01-16
 
 ### Added
