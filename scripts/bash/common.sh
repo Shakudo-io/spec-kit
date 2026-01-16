@@ -271,6 +271,278 @@ list_projects_detailed() {
 }
 
 # =============================================================================
+# SPEC ROLLUP FUNCTIONS
+# =============================================================================
+
+# Scan a single project for specs, returns tab-separated: feature_name, spec_path, has_spec, has_plan, has_tasks, last_modified
+scan_project_for_specs() {
+    local project_dir="$1"
+    [[ -d "$project_dir" ]] || return 1
+    
+    local specs_dir=""
+    if [[ -d "$project_dir/.specify/specs" ]]; then
+        specs_dir="$project_dir/.specify/specs"
+    elif [[ -d "$project_dir/specs" ]]; then
+        specs_dir="$project_dir/specs"
+    else
+        return 0
+    fi
+    
+    for feature_dir in "$specs_dir"/*/; do
+        [[ -d "$feature_dir" ]] || continue
+        local feature_name
+        feature_name=$(basename "$feature_dir")
+        
+        [[ "$feature_name" == "*" ]] && continue
+        
+        local has_spec="false"
+        local has_plan="false"
+        local has_tasks="false"
+        local last_modified="0"
+        local spec_path="${feature_dir}spec.md"
+        
+        if [[ -f "${feature_dir}spec.md" ]]; then
+            has_spec="true"
+            local mod_time
+            mod_time=$(stat -c %Y "${feature_dir}spec.md" 2>/dev/null || stat -f %m "${feature_dir}spec.md" 2>/dev/null || echo "0")
+            [[ "$mod_time" -gt "$last_modified" ]] && last_modified="$mod_time"
+        fi
+        
+        if [[ -f "${feature_dir}plan.md" ]]; then
+            has_plan="true"
+            local mod_time
+            mod_time=$(stat -c %Y "${feature_dir}plan.md" 2>/dev/null || stat -f %m "${feature_dir}plan.md" 2>/dev/null || echo "0")
+            [[ "$mod_time" -gt "$last_modified" ]] && last_modified="$mod_time"
+        fi
+        
+        if [[ -f "${feature_dir}tasks.md" ]]; then
+            has_tasks="true"
+            local mod_time
+            mod_time=$(stat -c %Y "${feature_dir}tasks.md" 2>/dev/null || stat -f %m "${feature_dir}tasks.md" 2>/dev/null || echo "0")
+            [[ "$mod_time" -gt "$last_modified" ]] && last_modified="$mod_time"
+        fi
+        
+        printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$feature_name" "$spec_path" "$has_spec" "$has_plan" "$has_tasks" "$last_modified"
+    done
+}
+
+# Scan entire workspace for specs with worktree deduplication
+# Output: project_name, feature_name, spec_path, has_spec, has_plan, has_tasks, last_modified, repo_url, branch, is_worktree
+scan_workspace_specs() {
+    local workspace_root
+    local include_worktrees="${1:-false}"
+    
+    if ! workspace_root=$(get_workspace_root); then
+        echo "ERROR: Not in a workspace" >&2
+        return 1
+    fi
+    
+    declare -A seen_repos
+    
+    for dir in "$workspace_root"/*/; do
+        [[ -d "$dir" ]] || continue
+        local project_name
+        project_name=$(basename "$dir")
+        
+        case "$project_name" in
+            node_modules|.git|.specify|.opencode|__pycache__|.venv|venv|.*|.claude|.cursor|.github)
+                continue
+                ;;
+        esac
+        
+        local repo_url=""
+        local branch=""
+        local is_worktree="false"
+        local main_worktree=""
+        
+        if git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+            repo_url=$(git -C "$dir" remote get-url origin 2>/dev/null || echo "")
+            branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+            
+            local git_dir
+            git_dir=$(git -C "$dir" rev-parse --git-dir 2>/dev/null)
+            if [[ "$git_dir" == *".git/worktrees/"* ]]; then
+                is_worktree="true"
+                local common_dir
+                common_dir=$(cd "$dir" && git rev-parse --git-common-dir 2>/dev/null)
+                main_worktree=$(cd "$dir" && cd "$common_dir" && pwd | sed 's|/.git$||')
+                main_worktree=$(basename "$main_worktree")
+            fi
+            
+            if [[ "$include_worktrees" != "true" ]] && [[ -n "$repo_url" ]]; then
+                if [[ "$is_worktree" == "true" ]]; then
+                    continue
+                fi
+                if [[ -n "${seen_repos[$repo_url]:-}" ]]; then
+                    continue
+                fi
+                seen_repos[$repo_url]="$project_name"
+            fi
+        fi
+        
+        while IFS=$'\t' read -r feature_name spec_path has_spec has_plan has_tasks last_modified; do
+            [[ -z "$feature_name" ]] && continue
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$project_name" "$feature_name" "$spec_path" "$has_spec" "$has_plan" "$has_tasks" "$last_modified" "$repo_url" "$branch" "$is_worktree"
+        done < <(scan_project_for_specs "$dir")
+    done
+}
+
+# Generate specs index files (JSON and Markdown) at workspace level
+generate_specs_index() {
+    local workspace_root
+    local include_worktrees="${1:-false}"
+    
+    if ! workspace_root=$(get_workspace_root); then
+        echo "ERROR: Not in a workspace" >&2
+        return 1
+    fi
+    
+    local index_json="$workspace_root/.specify/specs-index.json"
+    local index_md="$workspace_root/.specify/specs-index.md"
+    local timestamp
+    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    
+    mkdir -p "$workspace_root/.specify"
+    
+    local json_specs=""
+    local md_content="# Workspace Specs Index\n\n"
+    md_content+="**Generated:** $timestamp\n"
+    md_content+="**Workspace:** $workspace_root\n\n"
+    md_content+="| Project | Feature | Spec | Plan | Tasks | Branch |\n"
+    md_content+="|---------|---------|------|------|-------|--------|\n"
+    
+    local spec_count=0
+    local first=true
+    
+    while IFS=$'\t' read -r project feature spec_path has_spec has_plan has_tasks last_modified repo_url branch is_worktree; do
+        [[ -z "$project" ]] && continue
+        
+        local id="${project}:${feature}"
+        local rel_spec_path="${project}/.specify/specs/${feature}/spec.md"
+        local rel_plan_path="${project}/.specify/specs/${feature}/plan.md"
+        local rel_tasks_path="${project}/.specify/specs/${feature}/tasks.md"
+        
+        if [[ ! -f "$workspace_root/$rel_spec_path" ]]; then
+            rel_spec_path="${project}/specs/${feature}/spec.md"
+            rel_plan_path="${project}/specs/${feature}/plan.md"
+            rel_tasks_path="${project}/specs/${feature}/tasks.md"
+        fi
+        
+        if $first; then
+            first=false
+        else
+            json_specs+=","
+        fi
+        
+        json_specs+="\n    {"
+        json_specs+="\"id\":\"$id\","
+        json_specs+="\"project\":\"$project\","
+        json_specs+="\"feature\":\"$feature\","
+        json_specs+="\"spec_path\":\"$rel_spec_path\","
+        json_specs+="\"plan_path\":\"$rel_plan_path\","
+        json_specs+="\"tasks_path\":\"$rel_tasks_path\","
+        json_specs+="\"has_spec\":$has_spec,"
+        json_specs+="\"has_plan\":$has_plan,"
+        json_specs+="\"has_tasks\":$has_tasks,"
+        json_specs+="\"repo_url\":\"$repo_url\","
+        json_specs+="\"branch\":\"$branch\","
+        json_specs+="\"is_worktree\":$is_worktree,"
+        json_specs+="\"last_modified\":$last_modified"
+        json_specs+="}"
+        
+        local spec_icon="$( [[ "$has_spec" == "true" ]] && echo "✓" || echo "-" )"
+        local plan_icon="$( [[ "$has_plan" == "true" ]] && echo "✓" || echo "-" )"
+        local tasks_icon="$( [[ "$has_tasks" == "true" ]] && echo "✓" || echo "-" )"
+        md_content+="| $project | $feature | $spec_icon | $plan_icon | $tasks_icon | $branch |\n"
+        
+        ((spec_count++))
+    done < <(scan_workspace_specs "$include_worktrees")
+    
+    printf '{\n  "version": "1.0",\n  "workspace_root": "%s",\n  "generated_at": "%s",\n  "spec_count": %d,\n  "specs": [%b\n  ]\n}\n' \
+        "$workspace_root" "$timestamp" "$spec_count" "$json_specs" > "$index_json"
+    
+    md_content+="\n**Total specs:** $spec_count\n"
+    printf '%b' "$md_content" > "$index_md"
+    
+    echo "$spec_count"
+}
+
+# Read specs index and return JSON content
+read_specs_index() {
+    local workspace_root
+    if ! workspace_root=$(get_workspace_root); then
+        echo "ERROR: Not in a workspace" >&2
+        return 1
+    fi
+    
+    local index_json="$workspace_root/.specify/specs-index.json"
+    if [[ ! -f "$index_json" ]]; then
+        echo "ERROR: Specs index not found. Run rollup first." >&2
+        return 1
+    fi
+    
+    cat "$index_json"
+}
+
+# Resolve project:feature to absolute spec directory path, auto-refresh if needed
+resolve_spec_path() {
+    local spec_id="$1"
+    local workspace_root
+    
+    if ! workspace_root=$(get_workspace_root); then
+        echo "ERROR: Not in a workspace" >&2
+        return 1
+    fi
+    
+    local project="${spec_id%%:*}"
+    local feature="${spec_id#*:}"
+    
+    if [[ "$project" == "$feature" ]] || [[ -z "$feature" ]]; then
+        echo "ERROR: Invalid spec ID format. Use project:feature" >&2
+        return 1
+    fi
+    
+    local index_json="$workspace_root/.specify/specs-index.json"
+    
+    if [[ ! -f "$index_json" ]]; then
+        echo "INFO: Index missing, generating..." >&2
+        generate_specs_index >/dev/null
+    fi
+    
+    local spec_path=""
+    if command -v jq >/dev/null 2>&1; then
+        spec_path=$(jq -r ".specs[] | select(.id == \"$spec_id\") | .spec_path" "$index_json" 2>/dev/null)
+    else
+        spec_path=$(grep -o "\"spec_path\":\"[^\"]*\"" "$index_json" | grep "$project.*$feature" | head -1 | sed 's/.*":"\([^"]*\)".*/\1/')
+    fi
+    
+    if [[ -z "$spec_path" ]] || [[ "$spec_path" == "null" ]]; then
+        echo "INFO: Spec not in index, refreshing..." >&2
+        generate_specs_index >/dev/null
+        if command -v jq >/dev/null 2>&1; then
+            spec_path=$(jq -r ".specs[] | select(.id == \"$spec_id\") | .spec_path" "$index_json" 2>/dev/null)
+        fi
+    fi
+    
+    if [[ -z "$spec_path" ]] || [[ "$spec_path" == "null" ]]; then
+        echo "ERROR: Spec '$spec_id' not found" >&2
+        return 1
+    fi
+    
+    local full_path="$workspace_root/$spec_path"
+    local spec_dir
+    spec_dir=$(dirname "$full_path")
+    
+    if [[ ! -d "$spec_dir" ]]; then
+        echo "ERROR: Spec directory not found: $spec_dir" >&2
+        return 1
+    fi
+    
+    echo "$spec_dir"
+}
+
+# =============================================================================
 # LEGACY FUNCTIONS (Backward compatible)
 # =============================================================================
 

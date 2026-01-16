@@ -36,7 +36,11 @@ PATHS_ONLY=false
 LIST_PROJECTS=false
 LIST_PROJECTS_DETAILED=false
 LIST_FEATURES=false
+LIST_SPECS=false
+ROLLUP=false
 WORKSPACE_INFO=false
+INCLUDE_WORKTREES=false
+FORCE_REFRESH=false
 FEATURE_SHORTHAND=""
 
 while [[ $# -gt 0 ]]; do
@@ -69,6 +73,22 @@ while [[ $# -gt 0 ]]; do
             LIST_FEATURES=true
             shift
             ;;
+        --list-specs)
+            LIST_SPECS=true
+            shift
+            ;;
+        --rollup)
+            ROLLUP=true
+            shift
+            ;;
+        --include-worktrees)
+            INCLUDE_WORKTREES=true
+            shift
+            ;;
+        --force-refresh)
+            FORCE_REFRESH=true
+            shift
+            ;;
         --workspace-info)
             WORKSPACE_INFO=true
             shift
@@ -99,7 +119,11 @@ OPTIONS:
   --feature <ref>     Explicit feature shorthand (alternative to positional arg)
   --list-features     List all available features in workspace mode
   --list-projects     List available projects in workspace mode
-  --list-projects-detailed  List projects with repo URL and branch info (JSON)
+  --list-projects-detailed  List projects with repo URL and branch info
+  --list-specs        List all specs across workspace (from index)
+  --rollup            Scan workspace and generate specs-index.json
+  --include-worktrees Include specs from worktrees (no deduplication)
+  --force-refresh     Force index refresh before listing specs
   --workspace-info    Output workspace context (projects, features, mode) as JSON
   --help, -h          Show this help message
 
@@ -132,6 +156,15 @@ EXAMPLES:
   
   # Get full workspace context for AI agents
   ./check-prerequisites.sh --workspace-info
+  
+  # Generate specs index (rollup)
+  ./check-prerequisites.sh --rollup
+  
+  # List all specs from index
+  ./check-prerequisites.sh --list-specs
+  
+  # List specs as JSON
+  ./check-prerequisites.sh --list-specs --json
   
 EOF
             exit 0
@@ -263,6 +296,67 @@ if $LIST_PROJECTS_DETAILED; then
             
             printf "%-40s %-8s %-10s %-20s %s\n" "$name" "$git_status" "$wt_status" "$br" "$rm"
         done < <(list_projects_detailed)
+    fi
+    exit 0
+fi
+
+if $ROLLUP; then
+    if ! is_workspace_mode; then
+        echo "ERROR: --rollup only works in workspace mode" >&2
+        echo "Initialize workspace with: specify workspace --here" >&2
+        exit 1
+    fi
+    
+    include_wt="false"
+    [[ "$INCLUDE_WORKTREES" == "true" ]] && include_wt="true"
+    
+    spec_count=$(generate_specs_index "$include_wt")
+    
+    if $JSON_MODE; then
+        read_specs_index
+    else
+        workspace_root=$(get_workspace_root)
+        echo "Workspace: $workspace_root"
+        echo "Specs indexed: $spec_count"
+        echo "Index files:"
+        echo "  - .specify/specs-index.json"
+        echo "  - .specify/specs-index.md"
+    fi
+    exit 0
+fi
+
+if $LIST_SPECS; then
+    if ! is_workspace_mode; then
+        echo "ERROR: --list-specs only works in workspace mode" >&2
+        echo "Initialize workspace with: specify workspace --here" >&2
+        exit 1
+    fi
+    
+    workspace_root=$(get_workspace_root)
+    index_file="$workspace_root/.specify/specs-index.json"
+    
+    if [[ ! -f "$index_file" ]] || $FORCE_REFRESH; then
+        include_wt="false"
+        [[ "$INCLUDE_WORKTREES" == "true" ]] && include_wt="true"
+        generate_specs_index "$include_wt" >/dev/null
+    fi
+    
+    if $JSON_MODE; then
+        read_specs_index
+    else
+        echo "Workspace: $workspace_root"
+        echo ""
+        printf "%-30s %-35s %-6s %-6s %-6s %s\n" "PROJECT" "FEATURE" "SPEC" "PLAN" "TASKS" "BRANCH"
+        printf "%-30s %-35s %-6s %-6s %-6s %s\n" "-------" "-------" "----" "----" "-----" "------"
+        
+        if command -v jq >/dev/null 2>&1; then
+            jq -r '.specs[] | [.project, .feature, (if .has_spec then "✓" else "-" end), (if .has_plan then "✓" else "-" end), (if .has_tasks then "✓" else "-" end), .branch] | @tsv' "$index_file" | \
+            while IFS=$'\t' read -r project feature has_spec has_plan has_tasks branch; do
+                printf "%-30s %-35s %-6s %-6s %-6s %s\n" "$project" "$feature" "$has_spec" "$has_plan" "$has_tasks" "$branch"
+            done
+        else
+            cat "$workspace_root/.specify/specs-index.md"
+        fi
     fi
     exit 0
 fi
