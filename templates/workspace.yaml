@@ -64,13 +64,34 @@ constitution_location: workspace
 #   __pycache__, .venv, venv, scripts, templates, memory, docs, media
 
 # ============================================================
+# AI AGENT DISCOVERY
+# ============================================================
+#
+# When starting in a workspace, AI agents should run:
+#
+#   .specify/scripts/bash/check-prerequisites.sh --workspace-info
+#
+# This returns JSON with available projects and features:
+#   {
+#     "workspace_mode": true,
+#     "workspace_root": "/path/to/workspace",
+#     "projects": ["repo1", "repo2"],
+#     "features": ["repo1-001", "repo2-001"]
+#   }
+#
+# List projects only:
+#   .specify/scripts/bash/check-prerequisites.sh --list-projects
+#
+# List projects as JSON:
+#   .specify/scripts/bash/check-prerequisites.sh --list-projects --json
+
+# ============================================================
 # USAGE EXAMPLES
 # ============================================================
 #
 # Creating a feature in workspace mode:
 #
-#   # From workspace root
-#   ./scripts/bash/create-new-feature.sh --project myrepo "Add authentication"
+#   /speckit.specify --project myrepo "Add authentication"
 #
 #   # Result:
 #   # - Branch: myrepo-001-authentication (in myrepo)
@@ -79,7 +100,7 @@ constitution_location: workspace
 # Working with features using shorthand:
 #
 #   # List all features
-#   ./scripts/bash/check-prerequisites.sh --list-features
+#   .specify/scripts/bash/check-prerequisites.sh --list-features
 #
 #   # Work on a specific feature
 #   /speckit.plan myrepo-001

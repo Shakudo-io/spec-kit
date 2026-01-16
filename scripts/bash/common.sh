@@ -202,21 +202,20 @@ list_projects() {
         return 1
     fi
     
-    # Find all git repositories in workspace
     for dir in "$workspace_root"/*/; do
         [[ -d "$dir" ]] || continue
         local name
         name=$(basename "$dir")
         
-        # Skip excluded patterns
+        # Skip excluded patterns and hidden directories
         case "$name" in
-            node_modules|.git|.specify|.opencode|specs|__pycache__|.venv|venv|scripts|templates|memory|docs|media)
+            node_modules|.git|.specify|.opencode|specs|__pycache__|.venv|venv|scripts|templates|memory|docs|media|.*|.claude|.cursor|.github)
                 continue
                 ;;
         esac
         
-        # Check if it's a git repo
-        if [[ -d "$dir/.git" ]] || git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+        # Check if it's a git repo OR has .specify directory (spec-kit initialized)
+        if [[ -d "$dir/.git" ]] || [[ -d "$dir/.specify" ]] || git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
             echo "$name"
         fi
     done
