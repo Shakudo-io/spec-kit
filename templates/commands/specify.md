@@ -20,7 +20,10 @@ This command supports multi-repository workspaces. When a `workspace.yaml` exist
 - **Use `--project <name>`** to specify the target repository (e.g., `/speckit.specify --project monorepo Add user auth`)
 - **Branch naming**: `{project}-{number}-{feature}` (e.g., `monorepo-001-user-auth`)
 - **Spec location**: `{workspace}/specs/{project}/{number}-{feature}/`
-- **Feature shorthand**: After creation, use `{project}-{number}` format (e.g., `monorepo-001`) with other commands
+- **After creation**: The spec is indexed automatically. Reference it using:
+  - **Legacy shorthand**: `{project}-{number}` (e.g., `monorepo-001`)
+  - **Workspace spec ID**: `{project}:{feature}` (e.g., `monorepo:001-user-auth`)
+- **List all specs**: Run `/speckit.specs` to see all indexed specs across the workspace
 
 If `--project` is not specified in workspace mode, the script will error and list available projects.
 

@@ -18,11 +18,14 @@ agent_scripts:
 
 ## Workspace Mode Support
 
-In multi-repository workspaces with `workspace.yaml`, you can specify features using shorthand:
+In multi-repository workspaces, you can specify features using two formats:
 
-- **Feature shorthand**: `/speckit.plan monorepo-001` - works on feature 001 in the monorepo project
+- **Legacy shorthand**: `/speckit.plan monorepo-001` - works on feature 001 in the monorepo project
+- **Workspace spec ID**: `/speckit.plan monorepo:001-user-auth` - uses the rollup index to resolve the full path
 - **From project directory**: If you're inside a project's git repo, the project is auto-detected
-- The script outputs `WORKSPACE_MODE`, `PROJECT_NAME`, and `PROJECT_ROOT` in JSON for context
+- **List all specs**: Run `/speckit.specs` or `scripts/bash/check-prerequisites.sh --list-specs` to see available specs
+
+The `project:feature` format uses the workspace specs index (`.specify/specs-index.json`) for resolution. Run `/speckit.rollup` first to generate the index.
 
 ## User Input
 

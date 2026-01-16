@@ -191,6 +191,7 @@ SCRIPT_DIR="$(CDPATH="" cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 # Handle feature shorthand if provided (must be done before workspace-level commands)
+RESOLVED_FEATURE_DIR=""
 if [[ -n "$FEATURE_SHORTHAND" ]]; then
     if ! is_workspace_mode; then
         echo "ERROR: Feature shorthand ($FEATURE_SHORTHAND) only works in workspace mode" >&2
@@ -215,8 +216,9 @@ if [[ -n "$FEATURE_SHORTHAND" ]]; then
         exit 1
     fi
     
-    # Set SPECIFY_FEATURE to the full feature name for subsequent operations
+    # Set SPECIFY_FEATURE and capture the resolved directory for direct use
     export SPECIFY_FEATURE="$SHORTHAND_FEATURE_NAME"
+    RESOLVED_FEATURE_DIR="$SHORTHAND_FEATURE_DIR"
 fi
 
 # Handle workspace-level commands (don't require feature context)
@@ -464,6 +466,19 @@ fi
 
 # Get feature paths and validate branch
 eval $(get_feature_paths)
+
+# Override with resolved feature directory if shorthand was used
+if [[ -n "$RESOLVED_FEATURE_DIR" ]]; then
+    FEATURE_DIR="$RESOLVED_FEATURE_DIR"
+    FEATURE_SPEC="$FEATURE_DIR/spec.md"
+    IMPL_PLAN="$FEATURE_DIR/plan.md"
+    TASKS="$FEATURE_DIR/tasks.md"
+    RESEARCH="$FEATURE_DIR/research.md"
+    DATA_MODEL="$FEATURE_DIR/data-model.md"
+    QUICKSTART="$FEATURE_DIR/quickstart.md"
+    CONTRACTS_DIR="$FEATURE_DIR/contracts"
+fi
+
 check_feature_branch "$CURRENT_BRANCH" "$HAS_GIT" || exit 1
 
 # If paths-only mode, output paths and exit (support JSON + paths-only combined)

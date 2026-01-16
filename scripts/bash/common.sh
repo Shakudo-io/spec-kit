@@ -799,9 +799,13 @@ check_dir() { [[ -d "$1" && -n $(ls -A "$1" 2>/dev/null) ]] && echo "  ✓ $2" |
 # FEATURE SHORTHAND PARSING
 # =============================================================================
 
-# Parse feature shorthand like "monorepo-001" or "monorepo-001-user-auth"
-# Returns: PROJECT_NAME, FEATURE_NUM, FEATURE_DIR
+# Parse feature shorthand/reference
+# Supports:
+#   - Legacy format: "project-NNN" or "project-NNN-name" (e.g., "monorepo-001")
+#   - Workspace format: "project:feature" (e.g., "monorepo:001-user-auth")
+# Returns: SHORTHAND_PROJECT, SHORTHAND_FEATURE_NUM, SHORTHAND_FEATURE_DIR, SHORTHAND_FEATURE_NAME
 # Usage: eval $(parse_feature_shorthand "monorepo-001")
+#        eval $(parse_feature_shorthand "monorepo:001-user-auth")
 parse_feature_shorthand() {
     local shorthand="$1"
     local workspace_root
@@ -816,9 +820,42 @@ parse_feature_shorthand() {
     local project=""
     local feature_num=""
     local feature_dir=""
+    local feature_name=""
     
+    # Pattern 0: project:feature (workspace rollup format, e.g., "monorepo:001-user-auth")
+    if [[ "$shorthand" == *":"* ]]; then
+        project="${shorthand%%:*}"
+        feature_name="${shorthand#*:}"
+        
+        # Try to resolve via specs-index.json first (uses resolve_spec_path)
+        if feature_dir=$(resolve_spec_path "$shorthand" 2>/dev/null); then
+            # Extract feature_num from feature_name if it starts with NNN
+            if [[ "$feature_name" =~ ^([0-9]{3}) ]]; then
+                feature_num="${BASH_REMATCH[1]}"
+            else
+                feature_num="000"  # Default if no number prefix
+            fi
+        else
+            # Fallback: try to find in project's specs dir
+            local project_specs="$workspace_root/$project/.specify/specs"
+            if [[ ! -d "$project_specs" ]]; then
+                project_specs="$workspace_root/$project/specs"
+            fi
+            
+            if [[ -d "$project_specs/$feature_name" ]]; then
+                feature_dir="$project_specs/$feature_name"
+                if [[ "$feature_name" =~ ^([0-9]{3}) ]]; then
+                    feature_num="${BASH_REMATCH[1]}"
+                else
+                    feature_num="000"
+                fi
+            else
+                echo "echo 'ERROR: Feature \"$feature_name\" not found in project \"$project\"' >&2; return 1"
+                return 1
+            fi
+        fi
     # Pattern 1: project-NNN (e.g., "monorepo-001")
-    if [[ "$shorthand" =~ ^([a-z0-9_-]+)-([0-9]{3})$ ]]; then
+    elif [[ "$shorthand" =~ ^([a-z0-9_-]+)-([0-9]{3})$ ]]; then
         project="${BASH_REMATCH[1]}"
         feature_num="${BASH_REMATCH[2]}"
     # Pattern 2: project-NNN-name (e.g., "monorepo-001-user-auth")
@@ -826,28 +863,36 @@ parse_feature_shorthand() {
         project="${BASH_REMATCH[1]}"
         feature_num="${BASH_REMATCH[2]}"
     else
-        echo "echo 'ERROR: Invalid shorthand format. Use: project-NNN (e.g., monorepo-001)' >&2; return 1"
+        echo "echo 'ERROR: Invalid shorthand format. Use: project-NNN (e.g., monorepo-001) or project:feature (e.g., monorepo:001-user-auth)' >&2; return 1"
         return 1
     fi
     
-    # Find the feature directory
-    local project_specs="$specs_dir/$project"
-    if [[ ! -d "$project_specs" ]]; then
-        echo "echo 'ERROR: No specs found for project: $project' >&2; return 1"
-        return 1
-    fi
-    
-    # Look for directory matching the feature number
-    for dir in "$project_specs"/"$feature_num"-*; do
-        if [[ -d "$dir" ]]; then
-            feature_dir="$dir"
-            break
+    # If we don't have feature_dir yet (legacy format), find it
+    if [[ -z "$feature_dir" ]]; then
+        # Find the feature directory
+        local project_specs="$specs_dir/$project"
+        if [[ ! -d "$project_specs" ]]; then
+            echo "echo 'ERROR: No specs found for project: $project' >&2; return 1"
+            return 1
         fi
-    done
+        
+        # Look for directory matching the feature number
+        for dir in "$project_specs"/"$feature_num"-*; do
+            if [[ -d "$dir" ]]; then
+                feature_dir="$dir"
+                break
+            fi
+        done
+        
+        if [[ -z "$feature_dir" || ! -d "$feature_dir" ]]; then
+            echo "echo 'ERROR: No feature found matching $project-$feature_num in $project_specs' >&2; return 1"
+            return 1
+        fi
+    fi
     
-    if [[ -z "$feature_dir" || ! -d "$feature_dir" ]]; then
-        echo "echo 'ERROR: No feature found matching $project-$feature_num in $project_specs' >&2; return 1"
-        return 1
+    # Get feature_name if not already set
+    if [[ -z "$feature_name" ]]; then
+        feature_name="$(basename "$feature_dir")"
     fi
     
     # Output variables for eval
@@ -855,7 +900,7 @@ parse_feature_shorthand() {
 SHORTHAND_PROJECT='$project'
 SHORTHAND_FEATURE_NUM='$feature_num'
 SHORTHAND_FEATURE_DIR='$feature_dir'
-SHORTHAND_FEATURE_NAME='$(basename "$feature_dir")'
+SHORTHAND_FEATURE_NAME='$feature_name'
 EOF
 }
 
