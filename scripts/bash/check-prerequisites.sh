@@ -192,6 +192,8 @@ source "$SCRIPT_DIR/common.sh"
 
 # Handle feature shorthand if provided (must be done before workspace-level commands)
 RESOLVED_FEATURE_DIR=""
+RESOLVED_SOURCE_DIR=""
+RESOLVED_SOURCE_INFO=""
 if [[ -n "$FEATURE_SHORTHAND" ]]; then
     if ! is_workspace_mode; then
         echo "ERROR: Feature shorthand ($FEATURE_SHORTHAND) only works in workspace mode" >&2
@@ -219,6 +221,14 @@ if [[ -n "$FEATURE_SHORTHAND" ]]; then
     # Set SPECIFY_FEATURE and capture the resolved directory for direct use
     export SPECIFY_FEATURE="$SHORTHAND_FEATURE_NAME"
     RESOLVED_FEATURE_DIR="$SHORTHAND_FEATURE_DIR"
+    
+    # Resolve source directory (where actual code changes should be made)
+    source_result=$(resolve_source_dir "$SHORTHAND_PROJECT" "$SHORTHAND_FEATURE_NAME" 2>/dev/null) || true
+    if [[ -n "$source_result" ]]; then
+        eval "$source_result"
+        RESOLVED_SOURCE_DIR="$SOURCE_DIR"
+        RESOLVED_SOURCE_INFO="$source_result"
+    fi
 fi
 
 # Handle workspace-level commands (don't require feature context)
@@ -484,13 +494,24 @@ check_feature_branch "$CURRENT_BRANCH" "$HAS_GIT" || exit 1
 # If paths-only mode, output paths and exit (support JSON + paths-only combined)
 if $PATHS_ONLY; then
     if $JSON_MODE; then
-        # Minimal JSON paths payload (no validation performed)
-        printf '{"REPO_ROOT":"%s","BRANCH":"%s","FEATURE_DIR":"%s","FEATURE_SPEC":"%s","IMPL_PLAN":"%s","TASKS":"%s"}\n' \
-            "$REPO_ROOT" "$CURRENT_BRANCH" "$FEATURE_DIR" "$FEATURE_SPEC" "$IMPL_PLAN" "$TASKS"
+        if [[ -n "$RESOLVED_SOURCE_DIR" ]]; then
+            eval "$RESOLVED_SOURCE_INFO"
+            printf '{"REPO_ROOT":"%s","BRANCH":"%s","SPEC_DIR":"%s","SOURCE_DIR":"%s","SOURCE_BRANCH":"%s","IS_WORKTREE":%s,"FEATURE_SPEC":"%s","IMPL_PLAN":"%s","TASKS":"%s"}\n' \
+                "$REPO_ROOT" "$CURRENT_BRANCH" "$FEATURE_DIR" "$SOURCE_DIR" "$SOURCE_BRANCH" "$IS_WORKTREE" "$FEATURE_SPEC" "$IMPL_PLAN" "$TASKS"
+        else
+            printf '{"REPO_ROOT":"%s","BRANCH":"%s","FEATURE_DIR":"%s","FEATURE_SPEC":"%s","IMPL_PLAN":"%s","TASKS":"%s"}\n' \
+                "$REPO_ROOT" "$CURRENT_BRANCH" "$FEATURE_DIR" "$FEATURE_SPEC" "$IMPL_PLAN" "$TASKS"
+        fi
     else
         echo "REPO_ROOT: $REPO_ROOT"
         echo "BRANCH: $CURRENT_BRANCH"
-        echo "FEATURE_DIR: $FEATURE_DIR"
+        echo "SPEC_DIR: $FEATURE_DIR"
+        if [[ -n "$RESOLVED_SOURCE_DIR" ]]; then
+            eval "$RESOLVED_SOURCE_INFO"
+            echo "SOURCE_DIR: $SOURCE_DIR"
+            echo "SOURCE_BRANCH: $SOURCE_BRANCH"
+            echo "IS_WORKTREE: $IS_WORKTREE"
+        fi
         echo "FEATURE_SPEC: $FEATURE_SPEC"
         echo "IMPL_PLAN: $IMPL_PLAN"
         echo "TASKS: $TASKS"
@@ -539,7 +560,6 @@ fi
 
 # Output results
 if $JSON_MODE; then
-    # Build JSON array of documents
     if [[ ${#docs[@]} -eq 0 ]]; then
         json_docs="[]"
     else
@@ -547,13 +567,29 @@ if $JSON_MODE; then
         json_docs="[${json_docs%,}]"
     fi
     
-    printf '{"FEATURE_DIR":"%s","AVAILABLE_DOCS":%s}\n' "$FEATURE_DIR" "$json_docs"
+    # Include source directory info if resolved (workspace mode with feature shorthand)
+    if [[ -n "$RESOLVED_SOURCE_DIR" ]]; then
+        eval "$RESOLVED_SOURCE_INFO"
+        printf '{"SPEC_DIR":"%s","SOURCE_DIR":"%s","SOURCE_BRANCH":"%s","IS_WORKTREE":%s,"EXPECTED_BRANCH":"%s","BRANCH_STATUS":"%s","AVAILABLE_DOCS":%s}\n' \
+            "$FEATURE_DIR" "$SOURCE_DIR" "$SOURCE_BRANCH" "$IS_WORKTREE" "$EXPECTED_BRANCH" "$BRANCH_STATUS" "$json_docs"
+    else
+        # Legacy output format (backward compatible)
+        printf '{"FEATURE_DIR":"%s","AVAILABLE_DOCS":%s}\n' "$FEATURE_DIR" "$json_docs"
+    fi
 else
-    # Text output
-    echo "FEATURE_DIR:$FEATURE_DIR"
-    echo "AVAILABLE_DOCS:"
+    echo "SPEC_DIR: $FEATURE_DIR"
     
-    # Show status of each potential document
+    if [[ -n "$RESOLVED_SOURCE_DIR" ]]; then
+        eval "$RESOLVED_SOURCE_INFO"
+        echo "SOURCE_DIR: $SOURCE_DIR"
+        echo "SOURCE_BRANCH: $SOURCE_BRANCH"
+        echo "IS_WORKTREE: $IS_WORKTREE"
+        if [[ "$BRANCH_STATUS" == "switch_needed" ]]; then
+            echo "WARNING: Source directory is on branch '$SOURCE_BRANCH', expected '$EXPECTED_BRANCH'"
+        fi
+    fi
+    
+    echo "AVAILABLE_DOCS:"
     check_file "$RESEARCH" "research.md"
     check_file "$DATA_MODEL" "data-model.md"
     check_dir "$CONTRACTS_DIR" "contracts/"

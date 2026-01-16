@@ -37,9 +37,24 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 ## Outline
 
-1. **Setup**: Run `{SCRIPT}` from repo root and parse JSON for FEATURE_SPEC, IMPL_PLAN, SPECS_DIR, BRANCH. For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
+1. **Setup**: Run `{SCRIPT}` from repo root and parse JSON output. For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
 
-2. **Load context**: Read FEATURE_SPEC and `/memory/constitution.md`. Load IMPL_PLAN template (already copied).
+   **JSON fields (workspace mode with feature shorthand)**:
+   - `SPEC_DIR`: Where spec documents live (spec.md, plan.md, research.md, etc.)
+   - `SOURCE_DIR`: Where source code lives (for analyzing existing code, making changes)
+   - `SOURCE_BRANCH`: Current branch of SOURCE_DIR
+   - `IS_WORKTREE`: Whether SOURCE_DIR is a git worktree
+   - `BRANCH_STATUS`: "ok" if on correct branch, "switch_needed" if branch switch required
+   - `AVAILABLE_DOCS`: List of existing spec documents
+   
+   **Legacy mode** (no feature shorthand): Uses `FEATURE_DIR` for both specs and source.
+
+   **CRITICAL**: 
+   - Read/write spec documents FROM: `SPEC_DIR`
+   - Analyze source code FROM: `SOURCE_DIR`
+   - If `BRANCH_STATUS` is "switch_needed", warn the user that source directory may need branch switching
+
+2. **Load context**: Read FEATURE_SPEC from `SPEC_DIR` and `/memory/constitution.md`. Load IMPL_PLAN template (already copied).
 
 3. **Execute plan workflow**: Follow the structure in IMPL_PLAN template to:
    - Fill Technical Context (mark unknowns as "NEEDS CLARIFICATION")

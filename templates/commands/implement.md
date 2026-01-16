@@ -26,7 +26,22 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 ## Outline
 
-1. Run `{SCRIPT}` from repo root and parse FEATURE_DIR and AVAILABLE_DOCS list. All paths must be absolute. For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
+1. Run `{SCRIPT}` from repo root and parse JSON output. All paths must be absolute. For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
+
+   **JSON fields (workspace mode with feature shorthand)**:
+   - `SPEC_DIR`: Where spec documents live (tasks.md, plan.md, etc.) - READ specs from here
+   - `SOURCE_DIR`: Where source code lives - WRITE code changes here
+   - `SOURCE_BRANCH`: Current branch of SOURCE_DIR
+   - `IS_WORKTREE`: Whether SOURCE_DIR is a git worktree  
+   - `BRANCH_STATUS`: "ok" if on correct branch, "switch_needed" if branch switch required
+   - `AVAILABLE_DOCS`: List of existing spec documents
+   
+   **Legacy mode** (no feature shorthand): Uses `FEATURE_DIR` for specs (code changes in current repo).
+
+   **CRITICAL**:
+   - Read task list and specs FROM: `SPEC_DIR`
+   - Write all source code TO: `SOURCE_DIR`
+   - If `BRANCH_STATUS` is "switch_needed", you may need to switch branches in SOURCE_DIR first
 
 2. **Check checklists status** (if FEATURE_DIR/checklists/ exists):
    - Scan all checklist files in the checklists/ directory

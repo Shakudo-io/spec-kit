@@ -35,9 +35,20 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 ## Outline
 
-1. **Setup**: Run `{SCRIPT}` from repo root and parse FEATURE_DIR and AVAILABLE_DOCS list. All paths must be absolute. For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
+1. **Setup**: Run `{SCRIPT}` from repo root and parse JSON output. All paths must be absolute. For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
 
-2. **Load design documents**: Read from FEATURE_DIR:
+   **JSON fields (workspace mode with feature shorthand)**:
+   - `SPEC_DIR`: Where spec documents live - READ plan.md, spec.md, etc. from here
+   - `SOURCE_DIR`: Where source code lives - file paths in tasks should reference this directory
+   - `SOURCE_BRANCH`: Current branch of SOURCE_DIR
+   - `IS_WORKTREE`: Whether SOURCE_DIR is a git worktree
+   - `AVAILABLE_DOCS`: List of existing spec documents
+   
+   **Legacy mode** (no feature shorthand): Uses `FEATURE_DIR` for specs.
+
+   **CRITICAL**: When generating file paths for tasks, use paths relative to `SOURCE_DIR` (not SPEC_DIR).
+
+2. **Load design documents**: Read from SPEC_DIR (or FEATURE_DIR in legacy mode):
    - **Required**: plan.md (tech stack, libraries, structure), spec.md (user stories with priorities)
    - **Optional**: data-model.md (entities), contracts/ (API endpoints), research.md (decisions), quickstart.md (test scenarios)
    - Note: Not all projects have all documents. Generate tasks based on what's available.

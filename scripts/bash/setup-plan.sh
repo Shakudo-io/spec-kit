@@ -52,6 +52,7 @@ SCRIPT_DIR="$(CDPATH="" cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 
 # Handle feature shorthand if provided
+RESOLVED_SOURCE_INFO=""
 if [[ -n "$FEATURE_SHORTHAND" ]]; then
     if ! is_workspace_mode; then
         echo "ERROR: Feature shorthand ($FEATURE_SHORTHAND) only works in workspace mode" >&2
@@ -75,12 +76,23 @@ if [[ -n "$FEATURE_SHORTHAND" ]]; then
     fi
     
     export SPECIFY_FEATURE="$SHORTHAND_FEATURE_NAME"
+    
+    source_result=$(resolve_source_dir "$SHORTHAND_PROJECT" "$SHORTHAND_FEATURE_NAME" 2>/dev/null) || true
+    if [[ -n "$source_result" ]]; then
+        RESOLVED_SOURCE_INFO="$source_result"
+    fi
+    
+    FEATURE_DIR="$SHORTHAND_FEATURE_DIR"
+    FEATURE_SPEC="$FEATURE_DIR/spec.md"
+    IMPL_PLAN="$FEATURE_DIR/plan.md"
+    TASKS="$FEATURE_DIR/tasks.md"
+    REPO_ROOT=$(get_workspace_root)
+    CURRENT_BRANCH=$(get_current_branch)
+    HAS_GIT="true"
+else
+    eval $(get_feature_paths)
+    check_feature_branch "$CURRENT_BRANCH" "$HAS_GIT" || exit 1
 fi
-
-eval $(get_feature_paths)
-
-# Check if we're on a proper feature branch (only for git repos)
-check_feature_branch "$CURRENT_BRANCH" "$HAS_GIT" || exit 1
 
 # Ensure the feature directory exists
 mkdir -p "$FEATURE_DIR"
@@ -98,12 +110,27 @@ fi
 
 # Output results
 if $JSON_MODE; then
-    printf '{"FEATURE_SPEC":"%s","IMPL_PLAN":"%s","SPECS_DIR":"%s","BRANCH":"%s","HAS_GIT":"%s"}\n' \
-        "$FEATURE_SPEC" "$IMPL_PLAN" "$FEATURE_DIR" "$CURRENT_BRANCH" "$HAS_GIT"
+    if [[ -n "$RESOLVED_SOURCE_INFO" ]]; then
+        eval "$RESOLVED_SOURCE_INFO"
+        printf '{"FEATURE_SPEC":"%s","IMPL_PLAN":"%s","SPEC_DIR":"%s","SOURCE_DIR":"%s","SOURCE_BRANCH":"%s","IS_WORKTREE":%s,"BRANCH_STATUS":"%s","BRANCH":"%s","HAS_GIT":"%s"}\n' \
+            "$FEATURE_SPEC" "$IMPL_PLAN" "$FEATURE_DIR" "$SOURCE_DIR" "$SOURCE_BRANCH" "$IS_WORKTREE" "$BRANCH_STATUS" "$CURRENT_BRANCH" "$HAS_GIT"
+    else
+        printf '{"FEATURE_SPEC":"%s","IMPL_PLAN":"%s","SPECS_DIR":"%s","BRANCH":"%s","HAS_GIT":"%s"}\n' \
+            "$FEATURE_SPEC" "$IMPL_PLAN" "$FEATURE_DIR" "$CURRENT_BRANCH" "$HAS_GIT"
+    fi
 else
     echo "FEATURE_SPEC: $FEATURE_SPEC"
     echo "IMPL_PLAN: $IMPL_PLAN" 
-    echo "SPECS_DIR: $FEATURE_DIR"
+    echo "SPEC_DIR: $FEATURE_DIR"
+    if [[ -n "$RESOLVED_SOURCE_INFO" ]]; then
+        eval "$RESOLVED_SOURCE_INFO"
+        echo "SOURCE_DIR: $SOURCE_DIR"
+        echo "SOURCE_BRANCH: $SOURCE_BRANCH"
+        echo "IS_WORKTREE: $IS_WORKTREE"
+        if [[ "$BRANCH_STATUS" == "switch_needed" ]]; then
+            echo "WARNING: Source directory on '$SOURCE_BRANCH', expected '$EXPECTED_BRANCH'"
+        fi
+    fi
     echo "BRANCH: $CURRENT_BRANCH"
     echo "HAS_GIT: $HAS_GIT"
 fi

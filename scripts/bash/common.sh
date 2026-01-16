@@ -337,15 +337,82 @@ scan_workspace_specs() {
         return 1
     fi
     
-    declare -A seen_repos
+    local strategy
+    strategy=$(get_workspace_config "spec_strategy" "distributed")
     
+    declare -A seen_repos
+    declare -A seen_specs
+    
+    # First scan centralized specs directory if strategy is centralized
+    if [[ "$strategy" == "centralized" ]]; then
+        local centralized_specs_dir
+        centralized_specs_dir=$(get_workspace_config "specs_dir" "$workspace_root/specs")
+        
+        if [[ -d "$centralized_specs_dir" ]]; then
+            for project_dir in "$centralized_specs_dir"/*/; do
+                [[ -d "$project_dir" ]] || continue
+                local project_name
+                project_name=$(basename "$project_dir")
+                
+                local repo_url=""
+                local branch=""
+                local is_worktree="false"
+                local project_root="$workspace_root/$project_name"
+                
+                if [[ -d "$project_root" ]] && git -C "$project_root" rev-parse --git-dir >/dev/null 2>&1; then
+                    repo_url=$(git -C "$project_root" remote get-url origin 2>/dev/null || echo "")
+                    branch=$(git -C "$project_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+                fi
+                
+                for feature_dir in "$project_dir"/*/; do
+                    [[ -d "$feature_dir" ]] || continue
+                    local feature_name
+                    feature_name=$(basename "$feature_dir")
+                    [[ "$feature_name" == "*" ]] && continue
+                    
+                    local has_spec="false"
+                    local has_plan="false"
+                    local has_tasks="false"
+                    local last_modified="0"
+                    local spec_path="${feature_dir}spec.md"
+                    
+                    if [[ -f "${feature_dir}spec.md" ]]; then
+                        has_spec="true"
+                        local mod_time
+                        mod_time=$(stat -c %Y "${feature_dir}spec.md" 2>/dev/null || stat -f %m "${feature_dir}spec.md" 2>/dev/null || echo "0")
+                        [[ "$mod_time" -gt "$last_modified" ]] && last_modified="$mod_time"
+                    fi
+                    
+                    if [[ -f "${feature_dir}plan.md" ]]; then
+                        has_plan="true"
+                        local mod_time
+                        mod_time=$(stat -c %Y "${feature_dir}plan.md" 2>/dev/null || stat -f %m "${feature_dir}plan.md" 2>/dev/null || echo "0")
+                        [[ "$mod_time" -gt "$last_modified" ]] && last_modified="$mod_time"
+                    fi
+                    
+                    if [[ -f "${feature_dir}tasks.md" ]]; then
+                        has_tasks="true"
+                        local mod_time
+                        mod_time=$(stat -c %Y "${feature_dir}tasks.md" 2>/dev/null || stat -f %m "${feature_dir}tasks.md" 2>/dev/null || echo "0")
+                        [[ "$mod_time" -gt "$last_modified" ]] && last_modified="$mod_time"
+                    fi
+                    
+                    seen_specs["${project_name}:${feature_name}"]="1"
+                    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                        "$project_name" "$feature_name" "$spec_path" "$has_spec" "$has_plan" "$has_tasks" "$last_modified" "$repo_url" "$branch" "$is_worktree"
+                done
+            done
+        fi
+    fi
+    
+    # Then scan individual project directories (for distributed mode or hybrid)
     for dir in "$workspace_root"/*/; do
         [[ -d "$dir" ]] || continue
         local project_name
         project_name=$(basename "$dir")
         
         case "$project_name" in
-            node_modules|.git|.specify|.opencode|__pycache__|.venv|venv|.*|.claude|.cursor|.github)
+            node_modules|.git|.specify|.opencode|__pycache__|.venv|venv|.*|.claude|.cursor|.github|specs)
                 continue
                 ;;
         esac
@@ -382,6 +449,11 @@ scan_workspace_specs() {
         
         while IFS=$'\t' read -r feature_name spec_path has_spec has_plan has_tasks last_modified; do
             [[ -z "$feature_name" ]] && continue
+            local spec_key="${project_name}:${feature_name}"
+            if [[ -n "${seen_specs[$spec_key]:-}" ]]; then
+                continue
+            fi
+            seen_specs[$spec_key]="1"
             printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
                 "$project_name" "$feature_name" "$spec_path" "$has_spec" "$has_plan" "$has_tasks" "$last_modified" "$repo_url" "$branch" "$is_worktree"
         done < <(scan_project_for_specs "$dir")
@@ -419,15 +491,13 @@ generate_specs_index() {
         [[ -z "$project" ]] && continue
         
         local id="${project}:${feature}"
-        local rel_spec_path="${project}/.specify/specs/${feature}/spec.md"
-        local rel_plan_path="${project}/.specify/specs/${feature}/plan.md"
-        local rel_tasks_path="${project}/.specify/specs/${feature}/tasks.md"
         
-        if [[ ! -f "$workspace_root/$rel_spec_path" ]]; then
-            rel_spec_path="${project}/specs/${feature}/spec.md"
-            rel_plan_path="${project}/specs/${feature}/plan.md"
-            rel_tasks_path="${project}/specs/${feature}/tasks.md"
-        fi
+        local rel_spec_path="${spec_path#$workspace_root/}"
+        rel_spec_path="${rel_spec_path//\/\//\/}"
+        local spec_dir
+        spec_dir=$(dirname "$rel_spec_path")
+        local rel_plan_path="${spec_dir}/plan.md"
+        local rel_tasks_path="${spec_dir}/tasks.md"
         
         if $first; then
             first=false
@@ -836,22 +906,41 @@ parse_feature_shorthand() {
                 feature_num="000"  # Default if no number prefix
             fi
         else
-            # Fallback: try to find in project's specs dir
-            local project_specs="$workspace_root/$project/.specify/specs"
-            if [[ ! -d "$project_specs" ]]; then
-                project_specs="$workspace_root/$project/specs"
+            # Fallback: try to find in centralized specs dir first, then project's own specs dir
+            local found="false"
+            
+            # Check centralized specs directory (workspace/specs/project/feature)
+            if [[ -d "$specs_dir/$project/$feature_name" ]]; then
+                feature_dir="$specs_dir/$project/$feature_name"
+                found="true"
             fi
             
-            if [[ -d "$project_specs/$feature_name" ]]; then
-                feature_dir="$project_specs/$feature_name"
-                if [[ "$feature_name" =~ ^([0-9]{3}) ]]; then
-                    feature_num="${BASH_REMATCH[1]}"
-                else
-                    feature_num="000"
+            # Check project's internal specs directories
+            if [[ "$found" == "false" ]]; then
+                local project_specs="$workspace_root/$project/.specify/specs"
+                if [[ -d "$project_specs/$feature_name" ]]; then
+                    feature_dir="$project_specs/$feature_name"
+                    found="true"
                 fi
-            else
+            fi
+            
+            if [[ "$found" == "false" ]]; then
+                local project_specs="$workspace_root/$project/specs"
+                if [[ -d "$project_specs/$feature_name" ]]; then
+                    feature_dir="$project_specs/$feature_name"
+                    found="true"
+                fi
+            fi
+            
+            if [[ "$found" == "false" ]]; then
                 echo "echo 'ERROR: Feature \"$feature_name\" not found in project \"$project\"' >&2; return 1"
                 return 1
+            fi
+            
+            if [[ "$feature_name" =~ ^([0-9]{3}) ]]; then
+                feature_num="${BASH_REMATCH[1]}"
+            else
+                feature_num="000"
             fi
         fi
     # Pattern 1: project-NNN (e.g., "monorepo-001")
@@ -947,6 +1036,130 @@ list_workspace_features() {
             fi
         done
     done
+}
+
+# =============================================================================
+# SOURCE DIRECTORY RESOLUTION (for workspace mode)
+# =============================================================================
+
+# Resolve the source directory for a feature in workspace mode
+# This is where actual source code changes should be made (worktree or main checkout)
+# Returns: Absolute path to source directory, IS_WORKTREE flag, and MAIN_PROJECT if worktree
+#
+# Logic:
+# 1. If a worktree exists for this feature's branch → use worktree
+# 2. Else if main checkout is on the feature branch → use main checkout
+# 3. Else → use main checkout (warn that branch may need switching)
+resolve_source_dir() {
+    local project="$1"
+    local feature="$2"  # e.g., "006-speed-dashboard-image"
+    local workspace_root
+    
+    if ! workspace_root=$(get_workspace_root 2>/dev/null); then
+        echo "ERROR: Not in a workspace" >&2
+        return 1
+    fi
+    
+    local branch_prefix
+    branch_prefix=$(get_workspace_config "branch_naming.include_project_prefix" "true")
+    
+    local expected_branch
+    if [[ "$branch_prefix" == "true" ]]; then
+        expected_branch="${project}-${feature}"
+    else
+        expected_branch="${feature}"
+    fi
+    
+    local main_checkout="$workspace_root/$project"
+    local worktree_base
+    worktree_base=$(get_workspace_config "worktrees.base_dir" "$workspace_root")
+    
+    # Check for worktree with various naming patterns
+    local worktree_path=""
+    local is_worktree="false"
+    local checked_paths=()
+    
+    # Pattern 1: project-feature (e.g., monorepo-006-speed-dashboard-image)
+    local wt_pattern1="$worktree_base/${project}-${feature}"
+    checked_paths+=("$wt_pattern1")
+    if [[ -d "$wt_pattern1" ]] && git -C "$wt_pattern1" rev-parse --git-dir >/dev/null 2>&1; then
+        worktree_path="$wt_pattern1"
+        is_worktree="true"
+    fi
+    
+    # Pattern 2: Just feature name (e.g., 006-speed-dashboard-image) - for legacy setups
+    if [[ -z "$worktree_path" ]]; then
+        local wt_pattern2="$worktree_base/${feature}"
+        checked_paths+=("$wt_pattern2")
+        if [[ -d "$wt_pattern2" ]] && git -C "$wt_pattern2" rev-parse --git-dir >/dev/null 2>&1; then
+            worktree_path="$wt_pattern2"
+            is_worktree="true"
+        fi
+    fi
+    
+    # Pattern 3: Check if there's any worktree on the expected branch (only if not already found)
+    if [[ -z "$worktree_path" ]] && { [[ -d "$main_checkout/.git" ]] || git -C "$main_checkout" rev-parse --git-dir >/dev/null 2>&1; }; then
+        while IFS= read -r line; do
+            if [[ "$line" == "worktree "* ]]; then
+                local wt_dir="${line#worktree }"
+                [[ "$wt_dir" == "$main_checkout" ]] && continue
+                local wt_branch
+                wt_branch=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+                if [[ "$wt_branch" == "$expected_branch" ]] || [[ "$wt_branch" == "$feature" ]]; then
+                    worktree_path="$wt_dir"
+                    is_worktree="true"
+                    break
+                fi
+            fi
+        done < <(git -C "$main_checkout" worktree list --porcelain 2>/dev/null || true)
+    fi
+    
+    # Determine source directory
+    local source_dir=""
+    local source_branch=""
+    local branch_status="ok"
+    
+    if [[ -n "$worktree_path" ]]; then
+        source_dir="$worktree_path"
+        source_branch=$(git -C "$worktree_path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+    elif [[ -d "$main_checkout" ]]; then
+        source_dir="$main_checkout"
+        source_branch=$(git -C "$main_checkout" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+        
+        # Check if main checkout is on the expected branch
+        if [[ "$source_branch" != "$expected_branch" ]] && [[ "$source_branch" != "$feature" ]]; then
+            branch_status="switch_needed"
+        fi
+    else
+        echo "ERROR: Cannot find source directory for project '$project'" >&2
+        return 1
+    fi
+    
+    # Output in eval-able format
+    cat <<EOF
+SOURCE_DIR='$source_dir'
+SOURCE_BRANCH='$source_branch'
+IS_WORKTREE='$is_worktree'
+EXPECTED_BRANCH='$expected_branch'
+BRANCH_STATUS='$branch_status'
+EOF
+}
+
+# Get source directory info as JSON (for check-prerequisites.sh --json)
+resolve_source_dir_json() {
+    local project="$1"
+    local feature="$2"
+    
+    local result
+    if ! result=$(resolve_source_dir "$project" "$feature" 2>/dev/null); then
+        printf '{"source_dir":"","is_worktree":false,"branch_status":"error","error":"Could not resolve source directory"}'
+        return 1
+    fi
+    
+    eval "$result"
+    
+    printf '{"source_dir":"%s","source_branch":"%s","is_worktree":%s,"expected_branch":"%s","branch_status":"%s"}' \
+        "$SOURCE_DIR" "$SOURCE_BRANCH" "$IS_WORKTREE" "$EXPECTED_BRANCH" "$BRANCH_STATUS"
 }
 
 # =============================================================================
