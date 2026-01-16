@@ -128,6 +128,42 @@ Enable management of specs, plans, and task lists at the workspace level while i
 - [ ] Add `Read-SpecsIndex` function
 - [ ] Add `Resolve-SpecPath` function
 
+#### 1.5 Live Testing - Phase 1
+> **Test environment:** `/root/gitrepos` workspace (has repos, worktrees, some with specs)
+
+- [ ] **Test `scan_project_for_specs()`**
+  ```bash
+  # Copy updated common.sh to workspace, then:
+  source .specify/scripts/bash/common.sh
+  scan_project_for_specs "/root/gitrepos/monorepo"
+  scan_project_for_specs "/root/gitrepos/business-automation"
+  ```
+  - Verify: Returns feature list with correct paths
+  - Verify: Handles projects without specs gracefully
+
+- [ ] **Test `scan_workspace_specs()`**
+  ```bash
+  scan_workspace_specs
+  ```
+  - Verify: Finds specs across multiple projects
+  - Verify: Worktree deduplication works (same repo URL = skip)
+
+- [ ] **Test `generate_specs_index()`**
+  ```bash
+  generate_specs_index
+  cat .specify/specs-index.json | jq .
+  cat .specify/specs-index.md
+  ```
+  - Verify: JSON is valid and contains expected fields
+  - Verify: Markdown is human-readable
+
+- [ ] **Test `resolve_spec_path()`**
+  ```bash
+  resolve_spec_path "monorepo:001-feature"
+  ```
+  - Verify: Returns correct absolute path
+  - Verify: Returns error for non-existent spec
+
 ### Phase 2: New Commands
 
 #### 2.1 `/speckit.rollup` Command
@@ -158,6 +194,41 @@ Enable management of specs, plans, and task lists at the workspace level while i
   - [ ] `--has-plan` / `--no-plan` - filter by plan existence
   - [ ] `--has-tasks` / `--no-tasks` - filter by tasks existence
 
+#### 2.3 Live Testing - Phase 2
+> **Non-destructive:** These commands only read/index, never modify specs
+
+- [ ] **Test `/speckit.rollup` (via script flag)**
+  ```bash
+  cd /root/gitrepos
+  ./.specify/scripts/bash/check-prerequisites.sh --rollup
+  ```
+  - Verify: Creates `.specify/specs-index.json`
+  - Verify: Creates `.specify/specs-index.md`
+  - Verify: Output shows count of specs found
+  - Verify: Running twice produces same result (idempotent)
+
+- [ ] **Test `/speckit.rollup --json`**
+  ```bash
+  ./.specify/scripts/bash/check-prerequisites.sh --rollup --json
+  ```
+  - Verify: Outputs valid JSON to stdout
+
+- [ ] **Test `/speckit.specs` (via script flag)**
+  ```bash
+  ./.specify/scripts/bash/check-prerequisites.sh --list-specs
+  ```
+  - Verify: Shows table with PROJECT | FEATURE | SPEC | PLAN | TASKS columns
+  - Verify: Auto-refreshes if index missing (delete index, run again)
+
+- [ ] **Test edge cases**
+  ```bash
+  # Empty/new workspace
+  mkdir /tmp/test-workspace && cd /tmp/test-workspace
+  specify workspace --here
+  ./.specify/scripts/bash/check-prerequisites.sh --rollup
+  # Should succeed with 0 specs
+  ```
+
 ### Phase 3: Update Existing Commands
 
 #### 3.1 Update `/speckit.plan`
@@ -186,6 +257,38 @@ Enable management of specs, plans, and task lists at the workspace level while i
   - [ ] If at workspace level with `--project`, create spec in that project
   - [ ] Update index after spec creation
 
+#### 3.5 Live Testing - Phase 3
+> **Test with disposable test spec** to avoid modifying real specs
+
+- [ ] **Setup test project with spec**
+  ```bash
+  cd /root/gitrepos
+  mkdir -p test-rollup-project/.specify/specs/001-test-feature
+  echo "# Test Spec" > test-rollup-project/.specify/specs/001-test-feature/spec.md
+  git -C test-rollup-project init
+  ./.specify/scripts/bash/check-prerequisites.sh --rollup
+  ```
+
+- [ ] **Test `project:feature` resolution**
+  ```bash
+  # Verify the spec appears in index
+  ./.specify/scripts/bash/check-prerequisites.sh --list-specs | grep test-rollup-project
+  ```
+
+- [ ] **Test command targeting (read-only first)**
+  ```bash
+  # Test that resolve_spec_path works from workspace level
+  source .specify/scripts/bash/common.sh
+  resolve_spec_path "test-rollup-project:001-test-feature"
+  # Should return: /root/gitrepos/test-rollup-project/.specify/specs/001-test-feature
+  ```
+
+- [ ] **Cleanup test project**
+  ```bash
+  rm -rf /root/gitrepos/test-rollup-project
+  ./.specify/scripts/bash/check-prerequisites.sh --rollup  # Re-index
+  ```
+
 ### Phase 4: Auto-Refresh & Staleness
 
 #### 4.1 Staleness Detection
@@ -203,6 +306,38 @@ Enable management of specs, plans, and task lists at the workspace level while i
 - [ ] Add warning message when auto-refresh occurs
 - [ ] Add `--no-auto-refresh` flag to disable
 
+#### 4.3 Live Testing - Phase 4
+> **Test auto-refresh behavior**
+
+- [ ] **Test missing index auto-refresh**
+  ```bash
+  cd /root/gitrepos
+  rm .specify/specs-index.json
+  source .specify/scripts/bash/common.sh
+  resolve_spec_path "monorepo:001-feature"  # Should auto-refresh and find
+  ls .specify/specs-index.json  # Should exist again
+  ```
+
+- [ ] **Test stale index detection**
+  ```bash
+  # Create a new spec after index was generated
+  mkdir -p test-stale/.specify/specs/001-new
+  echo "# New" > test-stale/.specify/specs/001-new/spec.md
+  git -C test-stale init
+  
+  # Try to resolve - should trigger refresh
+  resolve_spec_path "test-stale:001-new"
+  
+  # Cleanup
+  rm -rf test-stale
+  ```
+
+- [ ] **Test --force-refresh flag**
+  ```bash
+  ./.specify/scripts/bash/check-prerequisites.sh --list-specs --force-refresh
+  ```
+  - Verify: Index is regenerated even if not stale
+
 ### Phase 5: Worktree Handling
 
 #### 5.1 Deduplication Logic
@@ -217,7 +352,32 @@ Enable management of specs, plans, and task lists at the workspace level while i
 - [ ] Show worktree info in `/speckit.specs` output when relevant
 - [ ] Allow targeting specific worktree with explicit path if needed
 
-### Phase 6: Documentation & Testing
+#### 5.3 Live Testing - Phase 5
+> **Test with actual worktrees in `/root/gitrepos`**
+
+- [ ] **Verify worktree deduplication**
+  ```bash
+  cd /root/gitrepos
+  ./.specify/scripts/bash/check-prerequisites.sh --rollup --json | jq '.deduped_worktrees'
+  ```
+  - Verify: `monorepo-feat-*` worktrees are listed as deduped
+  - Verify: `business-automation-*` worktrees are listed as deduped
+  - Verify: Main repos (`monorepo`, `business-automation`) have their specs indexed
+
+- [ ] **Verify specs only appear once**
+  ```bash
+  ./.specify/scripts/bash/check-prerequisites.sh --list-specs | grep monorepo
+  ```
+  - Verify: Each spec appears once, not duplicated across worktrees
+
+- [ ] **Test --include-worktrees flag**
+  ```bash
+  ./.specify/scripts/bash/check-prerequisites.sh --rollup --include-worktrees
+  ./.specify/scripts/bash/check-prerequisites.sh --list-specs
+  ```
+  - Verify: Now shows specs from worktrees too (with worktree indicator)
+
+### Phase 6: Documentation & Final Validation
 
 #### 6.1 Documentation
 - [ ] Update README.md with workspace-level commands
@@ -225,14 +385,47 @@ Enable management of specs, plans, and task lists at the workspace level while i
 - [ ] Document `project:feature` syntax
 - [ ] Add examples for multi-repo workspace scenarios
 
-#### 6.2 Testing
-- [ ] Test with workspace containing:
-  - [ ] Multiple independent repos
-  - [ ] Repos with multiple worktrees
-  - [ ] Mix of projects with and without specs
-  - [ ] Nested spec directories
-- [ ] Test auto-refresh scenarios
-- [ ] Test edge cases (empty workspace, missing index, etc.)
+#### 6.2 Final Integration Testing
+> **End-to-end workflow validation**
+
+- [ ] **Full workflow test**
+  ```bash
+  cd /root/gitrepos
+  
+  # 1. Fresh rollup
+  rm -f .specify/specs-index.json .specify/specs-index.md
+  ./.specify/scripts/bash/check-prerequisites.sh --rollup
+  
+  # 2. List all specs
+  ./.specify/scripts/bash/check-prerequisites.sh --list-specs
+  
+  # 3. Get JSON output
+  ./.specify/scripts/bash/check-prerequisites.sh --list-specs --json | jq '.specs | length'
+  
+  # 4. Filter by project
+  ./.specify/scripts/bash/check-prerequisites.sh --list-specs --project monorepo
+  ```
+
+- [ ] **Cross-platform validation (if PowerShell available)**
+  ```powershell
+  cd /root/gitrepos
+  ./.specify/scripts/powershell/check-prerequisites.ps1 -Rollup
+  ./.specify/scripts/powershell/check-prerequisites.ps1 -ListSpecs
+  ```
+
+- [ ] **Verify no regressions in existing functionality**
+  ```bash
+  # Existing commands should still work
+  ./.specify/scripts/bash/check-prerequisites.sh --list-projects
+  ./.specify/scripts/bash/check-prerequisites.sh --list-projects-detailed
+  ./.specify/scripts/bash/check-prerequisites.sh --list-features --project spec-kit
+  ```
+
+- [ ] **Edge case coverage**
+  - [ ] Empty workspace (no projects with specs)
+  - [ ] Projects with no specs mixed with projects that have specs
+  - [ ] Corrupted/incomplete spec folders
+  - [ ] Very large workspace (many projects)
 
 ---
 
