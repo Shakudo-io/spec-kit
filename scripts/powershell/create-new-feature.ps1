@@ -1,43 +1,90 @@
 #!/usr/bin/env pwsh
 # Create a new feature
+# Version: 2.0.0 - Multi-repository workspace support
 [CmdletBinding()]
 param(
     [switch]$Json,
     [string]$ShortName,
     [int]$Number = 0,
+    [string]$Project,
     [switch]$Help,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$FeatureDescription
 )
 $ErrorActionPreference = 'Stop'
 
+# Source common functions
+. "$PSScriptRoot/common.ps1"
+
 # Show help if requested
 if ($Help) {
-    Write-Host "Usage: ./create-new-feature.ps1 [-Json] [-ShortName <name>] [-Number N] <feature description>"
+    Write-Host "Usage: ./create-new-feature.ps1 [-Json] [-ShortName <name>] [-Number N] [-Project <name>] <feature description>"
     Write-Host ""
     Write-Host "Options:"
     Write-Host "  -Json               Output in JSON format"
     Write-Host "  -ShortName <name>   Provide a custom short name (2-4 words) for the branch"
     Write-Host "  -Number N           Specify branch number manually (overrides auto-detection)"
+    Write-Host "  -Project <name>     Project name (required in workspace mode)"
     Write-Host "  -Help               Show this help message"
     Write-Host ""
+    Write-Host "Workspace Mode:"
+    Write-Host "  When workspace.yaml is detected, features are created with project prefix:"
+    Write-Host "    Branch: project-001-feature-name"
+    Write-Host "    Specs: {workspace}/specs/project/001-feature-name/"
+    Write-Host ""
     Write-Host "Examples:"
+    Write-Host "  # Legacy mode (single repo)"
     Write-Host "  ./create-new-feature.ps1 'Add user authentication system' -ShortName 'user-auth'"
-    Write-Host "  ./create-new-feature.ps1 'Implement OAuth2 integration for API'"
+    Write-Host ""
+    Write-Host "  # Workspace mode (multi-repo)"
+    Write-Host "  ./create-new-feature.ps1 -Project myrepo 'Add user authentication system'"
     exit 0
 }
 
 # Check if feature description provided
 if (-not $FeatureDescription -or $FeatureDescription.Count -eq 0) {
-    Write-Error "Usage: ./create-new-feature.ps1 [-Json] [-ShortName <name>] <feature description>"
+    Write-Error "Usage: ./create-new-feature.ps1 [-Json] [-ShortName <name>] [-Project <name>] <feature description>"
     exit 1
 }
 
 $featureDesc = ($FeatureDescription -join ' ').Trim()
 
-# Resolve repository root. Prefer git information when available, but fall back
-# to searching for repository markers so the workflow still functions in repositories that
-# were initialized with --no-git.
+# Detect workspace mode
+$isWorkspaceMode = Test-WorkspaceMode
+$workspaceRoot = $null
+
+if ($isWorkspaceMode) {
+    $workspaceRoot = Get-WorkspaceRoot
+    
+    # In workspace mode, project is required
+    if (-not $Project) {
+        # Try to get from env
+        if ($env:SPECIFY_PROJECT) {
+            $Project = $env:SPECIFY_PROJECT
+        } else {
+            Write-Error "ERROR: --project is required in workspace mode. Available projects:"
+            $projects = Get-Projects
+            foreach ($p in $projects) {
+                Write-Error "  - $p"
+            }
+            exit 1
+        }
+    }
+    
+    # Validate project exists
+    $projectPath = Join-Path $workspaceRoot $Project
+    if (-not (Test-Path $projectPath)) {
+        Write-Error "ERROR: Project '$Project' not found in workspace: $workspaceRoot"
+        Write-Error "Available projects:"
+        $projects = Get-Projects
+        foreach ($p in $projects) {
+            Write-Error "  - $p"
+        }
+        exit 1
+    }
+}
+
+# Resolve repository root
 function Find-RepositoryRoot {
     param(
         [string]$StartDir,
@@ -52,7 +99,6 @@ function Find-RepositoryRoot {
         }
         $parent = Split-Path $current -Parent
         if ($parent -eq $current) {
-            # Reached filesystem root without finding markers
             return $null
         }
         $current = $parent
@@ -60,14 +106,24 @@ function Find-RepositoryRoot {
 }
 
 function Get-HighestNumberFromSpecs {
-    param([string]$SpecsDir)
+    param([string]$SpecsDir, [string]$ProjectPrefix = "")
     
     $highest = 0
     if (Test-Path $SpecsDir) {
         Get-ChildItem -Path $SpecsDir -Directory | ForEach-Object {
-            if ($_.Name -match '^(\d+)') {
-                $num = [int]$matches[1]
-                if ($num -gt $highest) { $highest = $num }
+            $name = $_.Name
+            if ($ProjectPrefix) {
+                # Workspace mode: check for project-NNN-* branches in project subfolder
+                if ($name -match '^(\d+)') {
+                    $num = [int]$matches[1]
+                    if ($num -gt $highest) { $highest = $num }
+                }
+            } else {
+                # Legacy mode: check for NNN-* pattern
+                if ($name -match '^(\d+)') {
+                    $num = [int]$matches[1]
+                    if ($num -gt $highest) { $highest = $num }
+                }
             }
         }
     }
@@ -75,25 +131,31 @@ function Get-HighestNumberFromSpecs {
 }
 
 function Get-HighestNumberFromBranches {
-    param()
+    param([string]$ProjectPrefix = "")
     
     $highest = 0
     try {
         $branches = git branch -a 2>$null
         if ($LASTEXITCODE -eq 0) {
             foreach ($branch in $branches) {
-                # Clean branch name: remove leading markers and remote prefixes
                 $cleanBranch = $branch.Trim() -replace '^\*?\s+', '' -replace '^remotes/[^/]+/', ''
                 
-                # Extract feature number if branch matches pattern ###-*
-                if ($cleanBranch -match '^(\d+)-') {
-                    $num = [int]$matches[1]
-                    if ($num -gt $highest) { $highest = $num }
+                if ($ProjectPrefix) {
+                    # Workspace mode: match project-NNN-* pattern
+                    if ($cleanBranch -match "^$ProjectPrefix-(\d+)-") {
+                        $num = [int]$matches[1]
+                        if ($num -gt $highest) { $highest = $num }
+                    }
+                } else {
+                    # Legacy mode: match NNN-* pattern
+                    if ($cleanBranch -match '^(\d+)-') {
+                        $num = [int]$matches[1]
+                        if ($num -gt $highest) { $highest = $num }
+                    }
                 }
             }
         }
     } catch {
-        # If git command fails, return 0
         Write-Verbose "Could not check Git branches: $_"
     }
     return $highest
@@ -101,62 +163,71 @@ function Get-HighestNumberFromBranches {
 
 function Get-NextBranchNumber {
     param(
-        [string]$SpecsDir
+        [string]$SpecsDir,
+        [string]$ProjectPrefix = ""
     )
 
-    # Fetch all remotes to get latest branch info (suppress errors if no remotes)
+    # Fetch all remotes to get latest branch info
     try {
         git fetch --all --prune 2>$null | Out-Null
     } catch {
         # Ignore fetch errors
     }
 
-    # Get highest number from ALL branches (not just matching short name)
-    $highestBranch = Get-HighestNumberFromBranches
+    $highestBranch = Get-HighestNumberFromBranches -ProjectPrefix $ProjectPrefix
+    $highestSpec = Get-HighestNumberFromSpecs -SpecsDir $SpecsDir -ProjectPrefix $ProjectPrefix
 
-    # Get highest number from ALL specs (not just matching short name)
-    $highestSpec = Get-HighestNumberFromSpecs -SpecsDir $SpecsDir
-
-    # Take the maximum of both
     $maxNum = [Math]::Max($highestBranch, $highestSpec)
-
-    # Return next number
     return $maxNum + 1
 }
 
 function ConvertTo-CleanBranchName {
     param([string]$Name)
-    
     return $Name.ToLower() -replace '[^a-z0-9]', '-' -replace '-{2,}', '-' -replace '^-', '' -replace '-$', ''
 }
-$fallbackRoot = (Find-RepositoryRoot -StartDir $PSScriptRoot)
-if (-not $fallbackRoot) {
-    Write-Error "Error: Could not determine repository root. Please run this script from within the repository."
-    exit 1
-}
 
-try {
-    $repoRoot = git rev-parse --show-toplevel 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        $hasGit = $true
-    } else {
-        throw "Git not available"
+# Determine repository context
+if ($isWorkspaceMode) {
+    $projectPath = Join-Path $workspaceRoot $Project
+    $repoRoot = $projectPath
+    
+    # Check if project has git
+    $hasGit = Test-Path (Join-Path $projectPath ".git")
+} else {
+    $fallbackRoot = Find-RepositoryRoot -StartDir $PSScriptRoot
+    if (-not $fallbackRoot) {
+        Write-Error "Error: Could not determine repository root."
+        exit 1
     }
-} catch {
-    $repoRoot = $fallbackRoot
-    $hasGit = $false
+
+    try {
+        $repoRoot = git rev-parse --show-toplevel 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $hasGit = $true
+        } else {
+            throw "Git not available"
+        }
+    } catch {
+        $repoRoot = $fallbackRoot
+        $hasGit = $false
+    }
 }
 
-Set-Location $repoRoot
+# Determine specs directory
+if ($isWorkspaceMode) {
+    $specsDir = Get-SpecsDir
+    $projectSpecsDir = Join-Path $specsDir $Project
+    New-Item -ItemType Directory -Path $projectSpecsDir -Force | Out-Null
+} else {
+    Set-Location $repoRoot
+    $specsDir = Join-Path $repoRoot 'specs'
+    New-Item -ItemType Directory -Path $specsDir -Force | Out-Null
+}
 
-$specsDir = Join-Path $repoRoot 'specs'
-New-Item -ItemType Directory -Path $specsDir -Force | Out-Null
-
-# Function to generate branch name with stop word filtering and length filtering
+# Function to generate branch name with stop word filtering
 function Get-BranchName {
     param([string]$Description)
     
-    # Common stop words to filter out
     $stopWords = @(
         'i', 'a', 'an', 'the', 'to', 'for', 'of', 'in', 'on', 'at', 'by', 'with', 'from',
         'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
@@ -165,96 +236,125 @@ function Get-BranchName {
         'want', 'need', 'add', 'get', 'set'
     )
     
-    # Convert to lowercase and extract words (alphanumeric only)
     $cleanName = $Description.ToLower() -replace '[^a-z0-9\s]', ' '
     $words = $cleanName -split '\s+' | Where-Object { $_ }
     
-    # Filter words: remove stop words and words shorter than 3 chars (unless they're uppercase acronyms in original)
     $meaningfulWords = @()
     foreach ($word in $words) {
-        # Skip stop words
         if ($stopWords -contains $word) { continue }
-        
-        # Keep words that are length >= 3 OR appear as uppercase in original (likely acronyms)
         if ($word.Length -ge 3) {
             $meaningfulWords += $word
         } elseif ($Description -match "\b$($word.ToUpper())\b") {
-            # Keep short words if they appear as uppercase in original (likely acronyms)
             $meaningfulWords += $word
         }
     }
     
-    # If we have meaningful words, use first 3-4 of them
     if ($meaningfulWords.Count -gt 0) {
         $maxWords = if ($meaningfulWords.Count -eq 4) { 4 } else { 3 }
         $result = ($meaningfulWords | Select-Object -First $maxWords) -join '-'
         return $result
     } else {
-        # Fallback to original logic if no meaningful words found
         $result = ConvertTo-CleanBranchName -Name $Description
         $fallbackWords = ($result -split '-') | Where-Object { $_ } | Select-Object -First 3
         return [string]::Join('-', $fallbackWords)
     }
 }
 
-# Generate branch name
+# Generate branch name suffix
 if ($ShortName) {
-    # Use provided short name, just clean it up
     $branchSuffix = ConvertTo-CleanBranchName -Name $ShortName
 } else {
-    # Generate from description with smart filtering
     $branchSuffix = Get-BranchName -Description $featureDesc
 }
 
 # Determine branch number
 if ($Number -eq 0) {
-    if ($hasGit) {
-        # Check existing branches on remotes
+    if ($isWorkspaceMode) {
+        $Number = Get-NextBranchNumber -SpecsDir $projectSpecsDir -ProjectPrefix $Project
+    } elseif ($hasGit) {
         $Number = Get-NextBranchNumber -SpecsDir $specsDir
     } else {
-        # Fall back to local directory check
         $Number = (Get-HighestNumberFromSpecs -SpecsDir $specsDir) + 1
     }
 }
 
 $featureNum = ('{0:000}' -f $Number)
-$branchName = "$featureNum-$branchSuffix"
+
+# Build branch name based on mode
+if ($isWorkspaceMode) {
+    $branchName = "$Project-$featureNum-$branchSuffix"
+    $featureDirName = "$featureNum-$branchSuffix"
+} else {
+    $branchName = "$featureNum-$branchSuffix"
+    $featureDirName = $branchName
+}
 
 # GitHub enforces a 244-byte limit on branch names
-# Validate and truncate if necessary
 $maxBranchLength = 244
 if ($branchName.Length -gt $maxBranchLength) {
-    # Calculate how much we need to trim from suffix
-    # Account for: feature number (3) + hyphen (1) = 4 chars
-    $maxSuffixLength = $maxBranchLength - 4
+    if ($isWorkspaceMode) {
+        $prefixLen = $Project.Length + 1 + 3 + 1  # project + hyphen + number + hyphen
+        $maxSuffixLength = $maxBranchLength - $prefixLen
+    } else {
+        $maxSuffixLength = $maxBranchLength - 4  # number + hyphen
+    }
     
-    # Truncate suffix
     $truncatedSuffix = $branchSuffix.Substring(0, [Math]::Min($branchSuffix.Length, $maxSuffixLength))
-    # Remove trailing hyphen if truncation created one
     $truncatedSuffix = $truncatedSuffix -replace '-$', ''
     
     $originalBranchName = $branchName
-    $branchName = "$featureNum-$truncatedSuffix"
+    if ($isWorkspaceMode) {
+        $branchName = "$Project-$featureNum-$truncatedSuffix"
+        $featureDirName = "$featureNum-$truncatedSuffix"
+    } else {
+        $branchName = "$featureNum-$truncatedSuffix"
+        $featureDirName = $branchName
+    }
     
     Write-Warning "[specify] Branch name exceeded GitHub's 244-byte limit"
     Write-Warning "[specify] Original: $originalBranchName ($($originalBranchName.Length) bytes)"
     Write-Warning "[specify] Truncated to: $branchName ($($branchName.Length) bytes)"
 }
 
+# Create git branch (if in project with git or not in workspace mode)
 if ($hasGit) {
-    try {
-        git checkout -b $branchName | Out-Null
-    } catch {
-        Write-Warning "Failed to create git branch: $branchName"
+    if ($isWorkspaceMode) {
+        # In workspace mode, create branch in project repo
+        Push-Location $projectPath
+        try {
+            git checkout -b $branchName 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Failed to create git branch: $branchName"
+            }
+        } catch {
+            Write-Warning "Failed to create git branch: $branchName"
+        }
+        Pop-Location
+    } else {
+        try {
+            git checkout -b $branchName | Out-Null
+        } catch {
+            Write-Warning "Failed to create git branch: $branchName"
+        }
     }
 } else {
     Write-Warning "[specify] Warning: Git repository not detected; skipped branch creation for $branchName"
 }
 
-$featureDir = Join-Path $specsDir $branchName
+# Create feature directory
+if ($isWorkspaceMode) {
+    $featureDir = Join-Path $projectSpecsDir $featureDirName
+} else {
+    $featureDir = Join-Path $specsDir $featureDirName
+}
 New-Item -ItemType Directory -Path $featureDir -Force | Out-Null
 
-$template = Join-Path $repoRoot '.specify/templates/spec-template.md'
+# Copy spec template
+if ($isWorkspaceMode) {
+    $template = Join-Path $workspaceRoot '.specify/templates/spec-template.md'
+} else {
+    $template = Join-Path $repoRoot '.specify/templates/spec-template.md'
+}
 $specFile = Join-Path $featureDir 'spec.md'
 if (Test-Path $template) { 
     Copy-Item $template $specFile -Force 
@@ -262,22 +362,37 @@ if (Test-Path $template) {
     New-Item -ItemType File -Path $specFile | Out-Null 
 }
 
-# Set the SPECIFY_FEATURE environment variable for the current session
-$env:SPECIFY_FEATURE = $branchName
+# Set environment variables
+$env:SPECIFY_FEATURE = $featureDirName
+if ($isWorkspaceMode) {
+    $env:SPECIFY_PROJECT = $Project
+}
+
+# Build output
+$output = [PSCustomObject]@{ 
+    BRANCH_NAME = $branchName
+    SPEC_FILE = $specFile
+    FEATURE_NUM = $featureNum
+    HAS_GIT = $hasGit
+    WORKSPACE_MODE = $isWorkspaceMode
+}
+
+if ($isWorkspaceMode) {
+    $output | Add-Member -NotePropertyName PROJECT -NotePropertyValue $Project
+    $output | Add-Member -NotePropertyName SHORTHAND -NotePropertyValue "$Project-$featureNum"
+}
 
 if ($Json) {
-    $obj = [PSCustomObject]@{ 
-        BRANCH_NAME = $branchName
-        SPEC_FILE = $specFile
-        FEATURE_NUM = $featureNum
-        HAS_GIT = $hasGit
-    }
-    $obj | ConvertTo-Json -Compress
+    $output | ConvertTo-Json -Compress
 } else {
     Write-Output "BRANCH_NAME: $branchName"
     Write-Output "SPEC_FILE: $specFile"
     Write-Output "FEATURE_NUM: $featureNum"
     Write-Output "HAS_GIT: $hasGit"
-    Write-Output "SPECIFY_FEATURE environment variable set to: $branchName"
+    Write-Output "WORKSPACE_MODE: $isWorkspaceMode"
+    if ($isWorkspaceMode) {
+        Write-Output "PROJECT: $Project"
+        Write-Output "SHORTHAND: $Project-$featureNum"
+    }
+    Write-Output "SPECIFY_FEATURE environment variable set to: $featureDirName"
 }
-
