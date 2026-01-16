@@ -7,6 +7,26 @@ All notable changes to the Specify CLI and templates are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.23] - 2026-01-16
+
+### Added
+
+- **Multi-repo workspace support**: New `specify workspace --here` command to initialize a multi-repository workspace for Spec-Driven Development
+  - Creates `.specify/workspace.yaml` with workspace configuration
+  - Creates shared constitution at `.specify/memory/constitution.md`
+  - Creates centralized `specs/` directory for all project specs
+  - Auto-detects existing projects (git repos or `.specify` directories)
+  - Supports `--force` flag to reinitialize existing workspaces
+  - Supports `--no-detect-projects` to skip project detection
+- **Workspace mode in bash scripts**: Updated `create-new-feature.sh` and `check-prerequisites.sh` with workspace support
+  - `--project <name>` flag for creating features in specific projects
+  - `--feature <ref>` flag for working with existing features
+  - `--list-features` flag to list all features across workspace
+  - Feature shorthand format: `project-NNN` (e.g., `myrepo-001`)
+  - Centralized specs at `{workspace}/specs/{project}/{feature}/`
+  - Branch naming: `{project}-{number}-{feature}`
+- **Updated command templates**: All `/speckit.*` commands now support workspace mode with `--project` flag
+
 ## [0.0.22] - 2025-11-07
 
 - Support for VS Code/Copilot agents, and moving away from prompts to proper agents with hand-offs.

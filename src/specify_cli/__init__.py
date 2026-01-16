@@ -1283,6 +1283,231 @@ def check():
         console.print("[dim]Tip: Install an AI assistant for the best experience[/dim]")
 
 @app.command()
+def workspace(
+    here: bool = typer.Option(False, "--here", help="Initialize workspace in the current directory"),
+    force: bool = typer.Option(False, "--force", help="Force initialization even if workspace.yaml already exists"),
+    detect_projects: bool = typer.Option(True, "--detect-projects/--no-detect-projects", help="Auto-detect projects in subdirectories"),
+):
+    """
+    Initialize a multi-repo workspace for Spec-Driven Development.
+    
+    This command will:
+    1. Create .specify/workspace.yaml with workspace configuration
+    2. Create .specify/memory/constitution.md for shared principles
+    3. Create specs/ directory for centralized spec storage
+    4. Optionally detect existing projects (git repos or .specify directories)
+    
+    Examples:
+        specify workspace --here                    # Initialize in current directory
+        specify workspace --here --force            # Overwrite existing workspace.yaml
+        specify workspace --here --no-detect-projects  # Skip project detection
+    """
+    
+    show_banner()
+    
+    if not here:
+        console.print("[red]Error:[/red] Must use --here flag to initialize workspace in current directory")
+        console.print("[dim]Usage: specify workspace --here[/dim]")
+        raise typer.Exit(1)
+    
+    workspace_path = Path.cwd()
+    workspace_name = workspace_path.name
+    
+    # Check for existing workspace.yaml
+    specify_dir = workspace_path / ".specify"
+    workspace_yaml_path = specify_dir / "workspace.yaml"
+    alt_workspace_yaml = workspace_path / "workspace.yaml"
+    
+    if (workspace_yaml_path.exists() or alt_workspace_yaml.exists()) and not force:
+        existing_path = workspace_yaml_path if workspace_yaml_path.exists() else alt_workspace_yaml
+        console.print(f"[yellow]Warning:[/yellow] Workspace already initialized at {existing_path}")
+        console.print("[dim]Use --force to reinitialize[/dim]")
+        raise typer.Exit(1)
+    
+    # Setup info panel
+    setup_lines = [
+        "[cyan]Workspace Setup[/cyan]",
+        "",
+        f"{'Workspace':<15} [green]{workspace_name}[/green]",
+        f"{'Path':<15} [dim]{workspace_path}[/dim]",
+    ]
+    console.print(Panel("\n".join(setup_lines), border_style="cyan", padding=(1, 2)))
+    
+    tracker = StepTracker("Initialize Workspace")
+    
+    # Add steps
+    tracker.add("dirs", "Create directory structure")
+    tracker.add("workspace-yaml", "Create workspace.yaml")
+    tracker.add("constitution", "Create shared constitution")
+    tracker.add("specs-dir", "Create specs directory")
+    if detect_projects:
+        tracker.add("detect", "Detect projects")
+    tracker.add("final", "Finalize")
+    
+    detected_projects = []
+    
+    with Live(tracker.render(), console=console, refresh_per_second=8, transient=True) as live:
+        tracker.attach_refresh(lambda: live.update(tracker.render()))
+        
+        try:
+            # Step 1: Create directory structure
+            tracker.start("dirs")
+            specify_dir.mkdir(parents=True, exist_ok=True)
+            memory_dir = specify_dir / "memory"
+            memory_dir.mkdir(exist_ok=True)
+            scripts_dir = specify_dir / "scripts"
+            scripts_dir.mkdir(exist_ok=True)
+            tracker.complete("dirs", ".specify/, memory/, scripts/")
+            
+            # Step 2: Create workspace.yaml
+            tracker.start("workspace-yaml")
+            workspace_yaml_content = f'''# Workspace Configuration for Multi-Repository Spec-Kit Setup
+# =============================================================
+#
+# Workspace: {workspace_name}
+# Created: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+#
+# For more information, see: https://github.com/github/spec-kit
+
+# Configuration version
+version: "1.0"
+
+# Spec Storage Strategy
+# ---------------------
+# centralized: All specs stored in {{workspace}}/specs/{{project}}/{{feature}}/
+spec_strategy: centralized
+
+# Branch Naming Prefix
+# --------------------
+# Feature branches include project name: project-001-feature
+branch_prefix: "{{project}}"
+
+# Behavior When No Project Specified
+# ----------------------------------
+# error: Fail with error message and list available projects
+no_project_behavior: error
+
+# Constitution Location
+# ---------------------
+# workspace: Use shared constitution at {{workspace}}/.specify/memory/constitution.md
+constitution_location: workspace
+'''
+            with open(workspace_yaml_path, 'w') as f:
+                f.write(workspace_yaml_content)
+            tracker.complete("workspace-yaml", ".specify/workspace.yaml")
+            
+            # Step 3: Create shared constitution
+            tracker.start("constitution")
+            constitution_path = memory_dir / "constitution.md"
+            if not constitution_path.exists():
+                constitution_content = f'''# Workspace Constitution
+# =====================
+#
+# This file defines the governing principles for the {workspace_name} workspace.
+# All projects within this workspace should follow these guidelines.
+#
+# Run /speckit.constitution to update this file with your project's principles.
+
+## Core Principles
+
+<!-- Add your workspace-wide principles here -->
+
+## Development Standards
+
+<!-- Add coding standards, testing requirements, etc. -->
+
+## Quality Guidelines
+
+<!-- Add quality and review guidelines -->
+'''
+                with open(constitution_path, 'w') as f:
+                    f.write(constitution_content)
+                tracker.complete("constitution", "constitution.md created")
+            else:
+                tracker.complete("constitution", "already exists")
+            
+            # Step 4: Create specs directory
+            tracker.start("specs-dir")
+            specs_dir = workspace_path / "specs"
+            specs_dir.mkdir(exist_ok=True)
+            # Create .gitkeep to ensure directory is tracked
+            gitkeep = specs_dir / ".gitkeep"
+            if not gitkeep.exists():
+                gitkeep.touch()
+            tracker.complete("specs-dir", "specs/")
+            
+            # Step 5: Detect projects (optional)
+            if detect_projects:
+                tracker.start("detect")
+                exclude_patterns = {
+                    "node_modules", ".git", ".specify", ".opencode", "specs",
+                    "__pycache__", ".venv", "venv", "scripts", "templates",
+                    "memory", "docs", "media", ".claude", ".cursor", ".github"
+                }
+                
+                for item in workspace_path.iterdir():
+                    if not item.is_dir():
+                        continue
+                    if item.name in exclude_patterns or item.name.startswith('.'):
+                        continue
+                    
+                    # Check if it's a git repo or has .specify
+                    is_git = (item / ".git").exists()
+                    has_specify = (item / ".specify").exists()
+                    
+                    if is_git or has_specify:
+                        detected_projects.append(item.name)
+                
+                if detected_projects:
+                    tracker.complete("detect", f"{len(detected_projects)} projects found")
+                else:
+                    tracker.complete("detect", "no projects found")
+            
+            tracker.complete("final", "workspace ready")
+            
+        except Exception as e:
+            tracker.error("final", str(e))
+            console.print(Panel(f"Workspace initialization failed: {e}", title="Error", border_style="red"))
+            raise typer.Exit(1)
+    
+    # Print final tree
+    console.print(tracker.render())
+    console.print("\n[bold green]Workspace initialized![/bold green]")
+    
+    # Show detected projects
+    if detected_projects:
+        projects_panel = Panel(
+            "\n".join([f"  • [cyan]{p}[/cyan]" for p in sorted(detected_projects)]),
+            title="Detected Projects",
+            border_style="cyan",
+            padding=(1, 2)
+        )
+        console.print()
+        console.print(projects_panel)
+    
+    # Show next steps
+    next_steps = [
+        "1. Edit [cyan].specify/workspace.yaml[/cyan] to customize workspace settings",
+        "2. Run [cyan]/speckit.constitution[/cyan] to establish workspace principles",
+        "3. Use [cyan]/speckit.specify --project <name>[/cyan] to create features",
+        "",
+        "[dim]Feature shorthand format: project-NNN (e.g., myrepo-001)[/dim]",
+    ]
+    
+    if not detected_projects:
+        next_steps.insert(0, "0. Add project directories (git repos) to this workspace")
+    
+    steps_panel = Panel(
+        "\n".join(next_steps),
+        title="Next Steps",
+        border_style="cyan",
+        padding=(1, 2)
+    )
+    console.print()
+    console.print(steps_panel)
+
+
+@app.command()
 def version():
     """Display version and system information."""
     import platform
