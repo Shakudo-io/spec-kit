@@ -30,6 +30,7 @@
 - [🔧 Prerequisites](#-prerequisites)
 - [📖 Learn More](#-learn-more)
 - [📋 Detailed Process](#-detailed-process)
+- [🏢 Multi-Repository Workspaces](#-multi-repository-workspaces)
 - [🔍 Troubleshooting](#-troubleshooting)
 - [👥 Maintainers](#-maintainers)
 - [💬 Support](#-support)
@@ -267,6 +268,19 @@ Additional commands for enhanced quality and validation:
 | `/speckit.clarify`   | Clarify underspecified areas (recommended before `/speckit.plan`; formerly `/quizme`)                                                |
 | `/speckit.analyze`   | Cross-artifact consistency & coverage analysis (run after `/speckit.tasks`, before `/speckit.implement`)                             |
 | `/speckit.checklist` | Generate custom quality checklists that validate requirements completeness, clarity, and consistency (like "unit tests for English") |
+
+#### Workspace Commands
+
+Commands for managing specs across multiple repositories in a workspace:
+
+| Command             | Description                                                           |
+| ------------------- | --------------------------------------------------------------------- |
+| `/speckit.workspace`| Initialize a multi-repo workspace with `workspace.yaml` configuration |
+| `/speckit.rollup`   | Scan workspace and generate a specs index across all projects         |
+| `/speckit.specs`    | List all specs in the workspace with status (spec/plan/tasks)         |
+| `/speckit.projects` | List all projects in the workspace with git info                      |
+
+**Workspace mode** allows you to manage specifications across multiple repositories from a single location. See [Multi-Repository Workspaces](#multi-repository-workspaces) for details.
 
 ### Environment Variables
 
@@ -614,6 +628,97 @@ The `/speckit.implement` command will:
 Once the implementation is complete, test the application and resolve any runtime errors that may not be visible in CLI logs (e.g., browser console errors). You can copy and paste such errors back to your AI agent for resolution.
 
 </details>
+
+---
+
+## 🏢 Multi-Repository Workspaces
+
+Spec Kit supports managing specifications across multiple repositories in a single workspace. This is useful for organizations with monorepo structures or multiple related projects.
+
+### Setting Up a Workspace
+
+1. **Initialize the workspace** in a directory containing multiple git repositories:
+
+```bash
+cd ~/projects  # Directory with multiple repos
+specify workspace --here
+```
+
+This creates a `workspace.yaml` configuration and sets up the `.specify/` directory at the workspace level.
+
+2. **Index all specs** across your repositories:
+
+```bash
+/speckit.rollup
+```
+
+This scans all projects and creates a `specs-index.json` with all discovered specifications.
+
+3. **List all specs** in the workspace:
+
+```bash
+/speckit.specs
+```
+
+Output example:
+```
+PROJECT                 FEATURE                        SPEC   PLAN   TASKS  BRANCH
+-------                 -------                        ----   ----   -----  ------
+backend-api             001-user-auth                  ✓      ✓      ✓      main
+backend-api             002-payment-integration        ✓      ✓      -      main
+frontend-app            001-dashboard                  ✓      ✓      ✓      dev
+mobile-app              001-onboarding                 ✓      -      -      main
+```
+
+### Working with Specs Across Projects
+
+Use the `project:feature` format to target specs from anywhere in the workspace:
+
+```bash
+# Create a plan for a spec in another project
+/speckit.plan backend-api:001-user-auth
+
+# Generate tasks for a spec
+/speckit.tasks frontend-app:001-dashboard
+
+# Implement a feature
+/speckit.implement mobile-app:001-onboarding
+```
+
+The workspace automatically resolves paths using the specs index.
+
+### Creating Specs in Workspace Mode
+
+When creating new specs, specify the target project:
+
+```bash
+/speckit.specify --project backend-api Add rate limiting to the API
+```
+
+This creates the spec in the correct project directory and updates the workspace index.
+
+### Workspace Commands Reference
+
+| Command | Description |
+|---------|-------------|
+| `specify workspace --here` | Initialize workspace in current directory |
+| `/speckit.rollup` | Regenerate the specs index |
+| `/speckit.specs` | List all specs with status |
+| `/speckit.projects` | List all projects with git info |
+| `--force-refresh` | Force index regeneration |
+| `--include-worktrees` | Include git worktrees (disabled by default to avoid duplicates) |
+
+### Spec Reference Formats
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| `project:feature` | `backend-api:001-user-auth` | Full workspace reference |
+| `project-NNN` | `backend-api-001` | Legacy shorthand |
+| Feature name only | `001-user-auth` | Works when inside the project directory |
+
+### Worktree Handling
+
+By default, workspace rollup deduplicates git worktrees to avoid indexing the same repository multiple times. Use `--include-worktrees` to include all worktrees if needed.
 
 ---
 
