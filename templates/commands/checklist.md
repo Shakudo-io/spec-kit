@@ -5,6 +5,14 @@ scripts:
   ps: scripts/powershell/check-prerequisites.ps1 -Json
 ---
 
+## Workspace Mode Support
+
+In multi-repository workspaces with `workspace.yaml`, you can specify features using shorthand:
+
+- **Feature shorthand**: `/speckit.checklist monorepo-001 UX requirements` - generates checklist for feature 001
+- **List features**: Run `scripts/bash/check-prerequisites.sh --list-features` to see all available features
+- The script outputs `WORKSPACE_MODE`, `PROJECT_NAME`, and `PROJECT_ROOT` in JSON for context
+
 ## Checklist Purpose: "Unit Tests for English"
 
 **CRITICAL CONCEPT**: Checklists are **UNIT TESTS FOR REQUIREMENTS WRITING** - they validate the quality, clarity, and completeness of requirements in a given domain.

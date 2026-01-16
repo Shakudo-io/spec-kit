@@ -1,0 +1,89 @@
+# Workspace Configuration for Multi-Repository Spec-Kit Setup
+# =============================================================
+#
+# This file enables workspace mode for managing specs across multiple
+# repositories in a single workspace directory.
+#
+# Place this file at:
+#   - {workspace}/.specify/workspace.yaml (installed)
+#   - {workspace}/workspace.yaml (alternative)
+#
+# For more information, see: https://github.com/github/spec-kit
+
+# Configuration version
+version: "1.0"
+
+# Spec Storage Strategy
+# ---------------------
+# centralized: All specs stored in {workspace}/specs/{project}/{feature}/
+#              Recommended for most workspaces. Single location for all specs.
+# distributed: Specs stored in each repo at {repo}/specs/{feature}/
+#              Use when repos need self-contained specs.
+spec_strategy: centralized
+
+# Centralized Specs Directory
+# ---------------------------
+# Only used when spec_strategy is "centralized"
+# Default: {workspace}/specs
+# specs_dir: "{workspace}/specs"
+
+# Branch Naming Prefix
+# --------------------
+# When true, feature branches include project name: project-001-feature
+# When false, branches use legacy format: 001-feature
+# Default: true (recommended for workspace mode)
+branch_prefix: "{project}"
+
+# Behavior When No Project Specified
+# ----------------------------------
+# What to do when --project is not provided in workspace mode:
+#   error: Fail with error message and list available projects (safest)
+#   prompt: Interactive prompt to select project (requires TTY)
+#   current: Use current directory name as project (convenience)
+# Default: error
+no_project_behavior: error
+
+# Constitution Location
+# ---------------------
+# Where to look for the shared constitution file:
+#   workspace: Use {workspace}/.specify/memory/constitution.md (shared)
+#   project: Use {project}/.specify/memory/constitution.md (per-repo)
+# Default: workspace
+constitution_location: workspace
+
+# ============================================================
+# PROJECT DISCOVERY
+# ============================================================
+#
+# The workspace automatically discovers projects by looking for:
+# 1. Directories with .git folders (git repositories)
+# 2. Directories with .specify folders (spec-kit initialized)
+#
+# Excluded patterns (always skipped):
+#   node_modules, .git, .specify, .opencode, specs,
+#   __pycache__, .venv, venv, scripts, templates, memory, docs, media
+
+# ============================================================
+# USAGE EXAMPLES
+# ============================================================
+#
+# Creating a feature in workspace mode:
+#
+#   # From workspace root
+#   ./scripts/bash/create-new-feature.sh --project myrepo "Add authentication"
+#
+#   # Result:
+#   # - Branch: myrepo-001-authentication (in myrepo)
+#   # - Specs: {workspace}/specs/myrepo/001-authentication/
+#
+# Working with features using shorthand:
+#
+#   # List all features
+#   ./scripts/bash/check-prerequisites.sh --list-features
+#
+#   # Work on a specific feature
+#   /speckit.plan myrepo-001
+#   /speckit.tasks myrepo-001
+#   /speckit.implement myrepo-001
+#
+# ============================================================

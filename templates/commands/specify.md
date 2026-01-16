@@ -13,6 +13,17 @@ scripts:
   ps: scripts/powershell/create-new-feature.ps1 -Json "{ARGS}"
 ---
 
+## Workspace Mode Support
+
+This command supports multi-repository workspaces. When a `workspace.yaml` exists in the workspace root:
+
+- **Use `--project <name>`** to specify the target repository (e.g., `/speckit.specify --project monorepo Add user auth`)
+- **Branch naming**: `{project}-{number}-{feature}` (e.g., `monorepo-001-user-auth`)
+- **Spec location**: `{workspace}/specs/{project}/{number}-{feature}/`
+- **Feature shorthand**: After creation, use `{project}-{number}` format (e.g., `monorepo-001`) with other commands
+
+If `--project` is not specified in workspace mode, the script will error and list available projects.
+
 ## User Input
 
 ```text

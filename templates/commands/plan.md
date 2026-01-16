@@ -16,6 +16,14 @@ agent_scripts:
   ps: scripts/powershell/update-agent-context.ps1 -AgentType __AGENT__
 ---
 
+## Workspace Mode Support
+
+In multi-repository workspaces with `workspace.yaml`, you can specify features using shorthand:
+
+- **Feature shorthand**: `/speckit.plan monorepo-001` - works on feature 001 in the monorepo project
+- **From project directory**: If you're inside a project's git repo, the project is auto-detected
+- The script outputs `WORKSPACE_MODE`, `PROJECT_NAME`, and `PROJECT_ROOT` in JSON for context
+
 ## User Input
 
 ```text

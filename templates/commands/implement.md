@@ -5,6 +5,14 @@ scripts:
   ps: scripts/powershell/check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks
 ---
 
+## Workspace Mode Support
+
+In multi-repository workspaces with `workspace.yaml`, you can specify features using shorthand:
+
+- **Feature shorthand**: `/speckit.implement monorepo-001` - implements feature 001 in the monorepo project
+- **List features**: Run `scripts/bash/check-prerequisites.sh --list-features` to see all available features
+- The script outputs `WORKSPACE_MODE`, `PROJECT_NAME`, and `PROJECT_ROOT` in JSON for context
+
 ## User Input
 
 ```text
