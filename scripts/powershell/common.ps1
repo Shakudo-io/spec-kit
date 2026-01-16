@@ -243,6 +243,8 @@ function Get-ProjectsDetailed {
         $hasGit = $false
         $remoteUrl = ""
         $branch = ""
+        $isWorktree = $false
+        $mainWorktree = ""
         
         try {
             $gitDir = git -C $dir rev-parse --git-dir 2>$null
@@ -252,6 +254,14 @@ function Get-ProjectsDetailed {
                 if ($LASTEXITCODE -ne 0) { $remoteUrl = "" }
                 $branch = git -C $dir rev-parse --abbrev-ref HEAD 2>$null
                 if ($LASTEXITCODE -ne 0) { $branch = "" }
+                
+                if ($gitDir -match '\.git[/\\]worktrees[/\\]') {
+                    $isWorktree = $true
+                    $commonDir = git -C $dir rev-parse --path-format=absolute --git-common-dir 2>$null
+                    if ($LASTEXITCODE -eq 0 -and $commonDir) {
+                        $mainWorktree = Split-Path (Split-Path $commonDir -Parent) -Leaf
+                    }
+                }
             }
         } catch { }
         
@@ -260,6 +270,8 @@ function Get-ProjectsDetailed {
             has_git = $hasGit
             remote_url = $remoteUrl
             branch = $branch
+            is_worktree = $isWorktree
+            main_worktree = $mainWorktree
         }
     }
     

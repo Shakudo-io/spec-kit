@@ -221,7 +221,7 @@ list_projects() {
     done
 }
 
-# List projects with detailed git information (repo URL, branch)
+# List projects with detailed git information (repo URL, branch, worktree info)
 list_projects_detailed() {
     local workspace_root
     if ! workspace_root=$(get_workspace_root); then
@@ -244,14 +244,28 @@ list_projects_detailed() {
             local remote_url=""
             local branch=""
             local has_git="false"
+            local is_worktree="false"
+            local main_worktree=""
             
             if git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
                 has_git="true"
                 remote_url=$(git -C "$dir" remote get-url origin 2>/dev/null || echo "")
                 branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+                
+                local git_dir
+                git_dir=$(git -C "$dir" rev-parse --git-dir 2>/dev/null)
+                if [[ "$git_dir" == *".git/worktrees/"* ]]; then
+                    is_worktree="true"
+                    # Get common git dir and resolve to absolute path (--path-format not available in older git)
+                    local common_dir
+                    common_dir=$(cd "$dir" && git rev-parse --git-common-dir 2>/dev/null)
+                    # Resolve to absolute path and strip /.git suffix
+                    main_worktree=$(cd "$dir" && cd "$common_dir" && pwd | sed 's|/.git$||')
+                    main_worktree=$(basename "$main_worktree")
+                fi
             fi
             
-            printf '%s\t%s\t%s\t%s\n' "$name" "$has_git" "$remote_url" "$branch"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$has_git" "$remote_url" "$branch" "$is_worktree" "$main_worktree"
         fi
     done
 }

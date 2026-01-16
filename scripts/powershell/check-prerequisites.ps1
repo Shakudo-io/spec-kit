@@ -133,13 +133,14 @@ if ($ListProjectsDetailed) {
     } else {
         Write-Output "Workspace: $workspaceRoot"
         Write-Output ""
-        Write-Output ("{0,-25} {1,-8} {2,-15} {3}" -f "PROJECT", "GIT", "BRANCH", "REMOTE")
-        Write-Output ("{0,-25} {1,-8} {2,-15} {3}" -f "-------", "---", "------", "------")
+        Write-Output ("{0,-40} {1,-8} {2,-10} {3,-20} {4}" -f "PROJECT", "GIT", "WORKTREE", "BRANCH", "REMOTE")
+        Write-Output ("{0,-40} {1,-8} {2,-10} {3,-20} {4}" -f "-------", "---", "--------", "------", "------")
         foreach ($p in $projects) {
             $gitStatus = if ($p.has_git) { "yes" } else { "no" }
+            $wtStatus = if ($p.is_worktree) { "of:$($p.main_worktree)" } else { "-" }
             $branch = if ($p.branch) { $p.branch } else { "-" }
             $remote = if ($p.remote_url) { $p.remote_url } else { "-" }
-            Write-Output ("{0,-25} {1,-8} {2,-15} {3}" -f $p.name, $gitStatus, $branch, $remote)
+            Write-Output ("{0,-40} {1,-8} {2,-10} {3,-20} {4}" -f $p.name, $gitStatus, $wtStatus, $branch, $remote)
         }
     }
     exit 0

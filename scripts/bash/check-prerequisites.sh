@@ -230,27 +230,38 @@ if $LIST_PROJECTS_DETAILED; then
     if $JSON_MODE; then
         printf '{"workspace_root":"%s","projects":[' "$workspace_root"
         first=true
-        while IFS=$'\t' read -r name has_git remote_url branch; do
+        while IFS=$'\t' read -r name has_git remote_url branch is_worktree main_worktree; do
             if $first; then
                 first=false
             else
                 printf ','
             fi
-            printf '{"name":"%s","has_git":%s,"remote_url":"%s","branch":"%s"}' \
-                "$name" "$has_git" "$remote_url" "$branch"
+            printf '{"name":"%s","has_git":%s,"remote_url":"%s","branch":"%s","is_worktree":%s,"main_worktree":"%s"}' \
+                "$name" "$has_git" "$remote_url" "$branch" "$is_worktree" "$main_worktree"
         done < <(list_projects_detailed)
         printf ']}\n'
     else
         echo "Workspace: $workspace_root"
         echo ""
-        printf "%-25s %-8s %-15s %s\n" "PROJECT" "GIT" "BRANCH" "REMOTE"
-        printf "%-25s %-8s %-15s %s\n" "-------" "---" "------" "------"
-        while IFS=$'\t' read -r name has_git remote_url branch; do
+        printf "%-40s %-8s %-10s %-20s %s\n" "PROJECT" "GIT" "WORKTREE" "BRANCH" "REMOTE"
+        printf "%-40s %-8s %-10s %-20s %s\n" "-------" "---" "--------" "------" "------"
+        while IFS=$'\t' read -r name has_git remote_url branch is_worktree main_worktree; do
+            git_status="no"
+            wt_status="-"
+            br="$branch"
+            rm="$remote_url"
+            
             if [[ "$has_git" == "true" ]]; then
-                printf "%-25s %-8s %-15s %s\n" "$name" "yes" "$branch" "$remote_url"
+                git_status="yes"
+                if [[ "$is_worktree" == "true" ]]; then
+                    wt_status="of:$main_worktree"
+                fi
             else
-                printf "%-25s %-8s %-15s %s\n" "$name" "no" "-" "-"
+                br="-"
+                rm="-"
             fi
+            
+            printf "%-40s %-8s %-10s %-20s %s\n" "$name" "$git_status" "$wt_status" "$br" "$rm"
         done < <(list_projects_detailed)
     fi
     exit 0
