@@ -21,6 +21,8 @@
 
 [CmdletBinding()]
 param(
+    [Parameter(Position=0)]
+    [string]$FeatureArg,
     [switch]$Json,
     [switch]$RequireTasks,
     [switch]$IncludeTasks,
@@ -147,16 +149,33 @@ if ($WorkspaceInfo) {
     exit 0
 }
 
-# Handle --feature parameter
+# Handle feature shorthand (positional arg or -Feature flag)
+$featureRef = if ($Feature) { $Feature } elseif ($FeatureArg) { $FeatureArg } else { $null }
 $project = $null
-if ($Feature) {
-    $parsed = Parse-FeatureShorthand -Ref $Feature
+if ($featureRef) {
+    if (-not (Test-WorkspaceMode)) {
+        Write-Error "Feature shorthand ($featureRef) only works in workspace mode. Initialize with: specify workspace --here"
+        exit 1
+    }
+    
+    $parsed = Parse-FeatureShorthand -Ref $featureRef
     if ($parsed.Valid) {
         if ($parsed.Project) {
+            $validProjects = Get-Projects
+            if (-not ($validProjects -contains $parsed.Project)) {
+                Write-Output "ERROR: Invalid project '$($parsed.Project)' in shorthand '$featureRef'"
+                Write-Output ""
+                Write-Output "Available projects:"
+                foreach ($p in $validProjects) {
+                    Write-Output "  - $p"
+                }
+                exit 1
+            }
+            
             $env:SPECIFY_PROJECT = $parsed.Project
             $project = $parsed.Project
         }
-        # Find the full feature name from specs
+        
         $specsDir = Get-SpecsDir
         if ($parsed.Project) {
             $projectSpecsDir = Join-Path $specsDir $parsed.Project
@@ -166,10 +185,21 @@ if ($Feature) {
                 } | Select-Object -First 1
                 if ($featureDir) {
                     $env:SPECIFY_FEATURE = $featureDir.Name
+                } else {
+                    Write-Output "ERROR: No feature found matching $($parsed.Project)-$($parsed.Number)"
+                    Write-Output "Available features in $($parsed.Project):"
+                    Get-ChildItem -Path $projectSpecsDir -Directory | ForEach-Object {
+                        if ($_.Name -match '^(\d{3})-') {
+                            Write-Output "  - $($parsed.Project)-$($matches[1])"
+                        }
+                    }
+                    exit 1
                 }
+            } else {
+                Write-Output "ERROR: No specs found for project: $($parsed.Project)"
+                exit 1
             }
         } else {
-            # Legacy format
             $featureDir = Get-ChildItem -Path $specsDir -Directory | Where-Object {
                 $_.Name -match "^$($parsed.Number)-"
             } | Select-Object -First 1
@@ -178,7 +208,7 @@ if ($Feature) {
             }
         }
     } else {
-        Write-Error "Invalid feature format: $Feature. Use project-NNN (e.g., myrepo-001) or NNN-description"
+        Write-Error "Invalid feature format: $featureRef. Use project-NNN (e.g., myrepo-001) or NNN-description"
         exit 1
     }
 }

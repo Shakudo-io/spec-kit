@@ -5,13 +5,20 @@
 # This script provides unified prerequisite checking for Spec-Driven Development workflow.
 # It replaces the functionality previously spread across multiple scripts.
 #
-# Usage: ./check-prerequisites.sh [OPTIONS]
+# Usage: ./check-prerequisites.sh [OPTIONS] [feature-shorthand]
+#
+# ARGUMENTS:
+#   feature-shorthand   Feature reference in workspace mode (e.g., "monorepo-001")
 #
 # OPTIONS:
 #   --json              Output in JSON format
 #   --require-tasks     Require tasks.md to exist (for implementation phase)
 #   --include-tasks     Include tasks.md in AVAILABLE_DOCS list
 #   --paths-only        Only output path variables (no validation)
+#   --feature <ref>     Explicit feature shorthand (alternative to positional arg)
+#   --list-features     List all available features in workspace mode
+#   --list-projects     List available projects in workspace mode
+#   --workspace-info    Output workspace context (projects, features, mode) as JSON
 #   --help, -h          Show help message
 #
 # OUTPUTS:
@@ -27,46 +34,83 @@ REQUIRE_TASKS=false
 INCLUDE_TASKS=false
 PATHS_ONLY=false
 LIST_PROJECTS=false
+LIST_FEATURES=false
 WORKSPACE_INFO=false
+FEATURE_SHORTHAND=""
 
-for arg in "$@"; do
-    case "$arg" in
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --json)
             JSON_MODE=true
+            shift
             ;;
         --require-tasks)
             REQUIRE_TASKS=true
+            shift
             ;;
         --include-tasks)
             INCLUDE_TASKS=true
+            shift
             ;;
         --paths-only)
             PATHS_ONLY=true
+            shift
             ;;
         --list-projects)
             LIST_PROJECTS=true
+            shift
+            ;;
+        --list-features)
+            LIST_FEATURES=true
+            shift
             ;;
         --workspace-info)
             WORKSPACE_INFO=true
+            shift
+            ;;
+        --feature)
+            if [[ -z "$2" || "$2" == --* ]]; then
+                echo "ERROR: --feature requires a value (e.g., --feature monorepo-001)" >&2
+                exit 1
+            fi
+            FEATURE_SHORTHAND="$2"
+            shift 2
             ;;
         --help|-h)
             cat << 'EOF'
-Usage: check-prerequisites.sh [OPTIONS]
+Usage: check-prerequisites.sh [OPTIONS] [feature-shorthand]
 
 Consolidated prerequisite checking for Spec-Driven Development workflow.
+
+ARGUMENTS:
+  feature-shorthand   Feature reference in workspace mode (e.g., "monorepo-001")
+                      Sets SPECIFY_FEATURE for subsequent operations
 
 OPTIONS:
   --json              Output in JSON format
   --require-tasks     Require tasks.md to exist (for implementation phase)
   --include-tasks     Include tasks.md in AVAILABLE_DOCS list
   --paths-only        Only output path variables (no prerequisite validation)
+  --feature <ref>     Explicit feature shorthand (alternative to positional arg)
+  --list-features     List all available features in workspace mode
   --list-projects     List available projects in workspace mode
   --workspace-info    Output workspace context (projects, features, mode) as JSON
   --help, -h          Show this help message
 
+WORKSPACE MODE:
+  In multi-repo workspaces, use feature shorthand to target specific features:
+  
+  ./check-prerequisites.sh --json monorepo-001
+  ./check-prerequisites.sh --json --feature backend-api-002
+  
+  The shorthand format is: project-NNN (e.g., monorepo-001, backend-api-002)
+
 EXAMPLES:
   # Check task prerequisites (plan.md required)
   ./check-prerequisites.sh --json
+  
+  # Check prerequisites for specific feature in workspace
+  ./check-prerequisites.sh --json monorepo-001
   
   # Check implementation prerequisites (plan.md + tasks.md required)
   ./check-prerequisites.sh --json --require-tasks --include-tasks
@@ -77,15 +121,28 @@ EXAMPLES:
   # List available projects in workspace
   ./check-prerequisites.sh --list-projects
   
+  # List available features in workspace
+  ./check-prerequisites.sh --list-features
+  
   # Get full workspace context for AI agents
   ./check-prerequisites.sh --workspace-info
   
 EOF
             exit 0
             ;;
-        *)
-            echo "ERROR: Unknown option '$arg'. Use --help for usage information." >&2
+        -*)
+            echo "ERROR: Unknown option '$1'. Use --help for usage information." >&2
             exit 1
+            ;;
+        *)
+            # Positional argument - treat as feature shorthand
+            if [[ -z "$FEATURE_SHORTHAND" ]]; then
+                FEATURE_SHORTHAND="$1"
+            else
+                echo "ERROR: Multiple positional arguments provided. Only one feature shorthand allowed." >&2
+                exit 1
+            fi
+            shift
             ;;
     esac
 done
@@ -93,6 +150,35 @@ done
 # Source common functions
 SCRIPT_DIR="$(CDPATH="" cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
+
+# Handle feature shorthand if provided (must be done before workspace-level commands)
+if [[ -n "$FEATURE_SHORTHAND" ]]; then
+    if ! is_workspace_mode; then
+        echo "ERROR: Feature shorthand ($FEATURE_SHORTHAND) only works in workspace mode" >&2
+        echo "Initialize workspace with: specify workspace --here" >&2
+        exit 1
+    fi
+    
+    # Parse and validate the feature shorthand
+    shorthand_result=$(parse_feature_shorthand "$FEATURE_SHORTHAND" 2>&1) || {
+        eval "$shorthand_result"
+        exit 1
+    }
+    eval "$shorthand_result"
+    
+    # Validate project exists in workspace
+    projects=$(list_projects 2>/dev/null || true)
+    if ! echo "$projects" | grep -qx "$SHORTHAND_PROJECT"; then
+        echo "ERROR: Invalid project '$SHORTHAND_PROJECT' in shorthand '$FEATURE_SHORTHAND'" >&2
+        echo "" >&2
+        echo "Available projects:" >&2
+        echo "$projects" | sed 's/^/  - /' >&2
+        exit 1
+    fi
+    
+    # Set SPECIFY_FEATURE to the full feature name for subsequent operations
+    export SPECIFY_FEATURE="$SHORTHAND_FEATURE_NAME"
+fi
 
 # Handle workspace-level commands (don't require feature context)
 if $LIST_PROJECTS; then
@@ -109,7 +195,6 @@ if $LIST_PROJECTS; then
     fi
     
     if $JSON_MODE; then
-        # Output as JSON array
         printf '['
         first=true
         while IFS= read -r project; do
@@ -123,6 +208,48 @@ if $LIST_PROJECTS; then
         printf ']\n'
     else
         echo "$projects"
+    fi
+    exit 0
+fi
+
+if $LIST_FEATURES; then
+    if ! is_workspace_mode; then
+        echo "ERROR: --list-features only works in workspace mode" >&2
+        echo "Initialize workspace with: specify workspace --here" >&2
+        exit 1
+    fi
+    
+    if $JSON_MODE; then
+        specs_dir=$(get_specs_dir)
+        if [[ ! -d "$specs_dir" ]]; then
+            printf '[]\n'
+            exit 0
+        fi
+        
+        printf '['
+        first=true
+        for project_dir in "$specs_dir"/*/; do
+            [[ -d "$project_dir" ]] || continue
+            project=$(basename "$project_dir")
+            
+            for feature_dir in "$project_dir"/*; do
+                [[ -d "$feature_dir" ]] || continue
+                feature=$(basename "$feature_dir")
+                
+                if [[ "$feature" =~ ^([0-9]{3})- ]]; then
+                    num="${BASH_REMATCH[1]}"
+                    if $first; then
+                        first=false
+                    else
+                        printf ','
+                    fi
+                    printf '"%s-%s"' "$project" "$num"
+                fi
+            done
+        done
+        printf ']\n'
+    else
+        list_workspace_features
     fi
     exit 0
 fi
