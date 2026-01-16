@@ -219,6 +219,53 @@ function Get-Projects {
     return $projects
 }
 
+function Get-ProjectsDetailed {
+    $workspaceRoot = Get-WorkspaceRoot
+    if (-not $workspaceRoot) {
+        return @()
+    }
+    
+    $excludePatterns = @(
+        'node_modules', '.git', '.specify', '.opencode', 'specs',
+        '__pycache__', '.venv', 'venv', 'scripts', 'templates',
+        'memory', 'docs', 'media', '.claude', '.cursor', '.github'
+    )
+    
+    $projects = @()
+    Get-ChildItem -Path $workspaceRoot -Directory | Where-Object {
+        $name = $_.Name
+        -not ($name.StartsWith('.')) -and
+        -not ($excludePatterns -contains $name) -and
+        ((Test-Path (Join-Path $_.FullName ".git")) -or (Test-Path (Join-Path $_.FullName ".specify")))
+    } | ForEach-Object {
+        $dir = $_.FullName
+        $name = $_.Name
+        $hasGit = $false
+        $remoteUrl = ""
+        $branch = ""
+        
+        try {
+            $gitDir = git -C $dir rev-parse --git-dir 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                $hasGit = $true
+                $remoteUrl = git -C $dir remote get-url origin 2>$null
+                if ($LASTEXITCODE -ne 0) { $remoteUrl = "" }
+                $branch = git -C $dir rev-parse --abbrev-ref HEAD 2>$null
+                if ($LASTEXITCODE -ne 0) { $branch = "" }
+            }
+        } catch { }
+        
+        $projects += [PSCustomObject]@{
+            name = $name
+            has_git = $hasGit
+            remote_url = $remoteUrl
+            branch = $branch
+        }
+    }
+    
+    return $projects
+}
+
 # =============================================================================
 # FEATURE SHORTHAND PARSING
 # =============================================================================

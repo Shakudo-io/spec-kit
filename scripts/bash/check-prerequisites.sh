@@ -34,6 +34,7 @@ REQUIRE_TASKS=false
 INCLUDE_TASKS=false
 PATHS_ONLY=false
 LIST_PROJECTS=false
+LIST_PROJECTS_DETAILED=false
 LIST_FEATURES=false
 WORKSPACE_INFO=false
 FEATURE_SHORTHAND=""
@@ -58,6 +59,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --list-projects)
             LIST_PROJECTS=true
+            shift
+            ;;
+        --list-projects-detailed)
+            LIST_PROJECTS_DETAILED=true
             shift
             ;;
         --list-features)
@@ -94,6 +99,7 @@ OPTIONS:
   --feature <ref>     Explicit feature shorthand (alternative to positional arg)
   --list-features     List all available features in workspace mode
   --list-projects     List available projects in workspace mode
+  --list-projects-detailed  List projects with repo URL and branch info (JSON)
   --workspace-info    Output workspace context (projects, features, mode) as JSON
   --help, -h          Show this help message
 
@@ -208,6 +214,44 @@ if $LIST_PROJECTS; then
         printf ']\n'
     else
         echo "$projects"
+    fi
+    exit 0
+fi
+
+if $LIST_PROJECTS_DETAILED; then
+    if ! is_workspace_mode; then
+        echo "ERROR: --list-projects-detailed only works in workspace mode" >&2
+        echo "Initialize workspace with: specify workspace --here" >&2
+        exit 1
+    fi
+    
+    workspace_root=$(get_workspace_root)
+    
+    if $JSON_MODE; then
+        printf '{"workspace_root":"%s","projects":[' "$workspace_root"
+        first=true
+        while IFS=$'\t' read -r name has_git remote_url branch; do
+            if $first; then
+                first=false
+            else
+                printf ','
+            fi
+            printf '{"name":"%s","has_git":%s,"remote_url":"%s","branch":"%s"}' \
+                "$name" "$has_git" "$remote_url" "$branch"
+        done < <(list_projects_detailed)
+        printf ']}\n'
+    else
+        echo "Workspace: $workspace_root"
+        echo ""
+        printf "%-25s %-8s %-15s %s\n" "PROJECT" "GIT" "BRANCH" "REMOTE"
+        printf "%-25s %-8s %-15s %s\n" "-------" "---" "------" "------"
+        while IFS=$'\t' read -r name has_git remote_url branch; do
+            if [[ "$has_git" == "true" ]]; then
+                printf "%-25s %-8s %-15s %s\n" "$name" "yes" "$branch" "$remote_url"
+            else
+                printf "%-25s %-8s %-15s %s\n" "$name" "no" "-" "-"
+            fi
+        done < <(list_projects_detailed)
     fi
     exit 0
 fi

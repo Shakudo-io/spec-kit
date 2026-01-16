@@ -30,6 +30,7 @@ param(
     [string]$Feature,
     [switch]$ListFeatures,
     [switch]$ListProjects,
+    [switch]$ListProjectsDetailed,
     [switch]$WorkspaceInfo,
     [switch]$Help
 )
@@ -110,7 +111,40 @@ if ($ListProjects) {
     exit 0
 }
 
-# Handle --list-features
+if ($ListProjectsDetailed) {
+    if (-not (Test-WorkspaceMode)) {
+        if ($Json) {
+            Write-Output '{"error":"Not in workspace mode","workspace_root":"","projects":[]}'
+        } else {
+            Write-Output "Not in workspace mode. Use 'specify workspace --here' to initialize."
+        }
+        exit 0
+    }
+    
+    $workspaceRoot = Get-WorkspaceRoot
+    $projects = Get-ProjectsDetailed
+    
+    if ($Json) {
+        $output = [PSCustomObject]@{
+            workspace_root = $workspaceRoot
+            projects = $projects
+        }
+        Write-Output ($output | ConvertTo-Json -Compress -Depth 3)
+    } else {
+        Write-Output "Workspace: $workspaceRoot"
+        Write-Output ""
+        Write-Output ("{0,-25} {1,-8} {2,-15} {3}" -f "PROJECT", "GIT", "BRANCH", "REMOTE")
+        Write-Output ("{0,-25} {1,-8} {2,-15} {3}" -f "-------", "---", "------", "------")
+        foreach ($p in $projects) {
+            $gitStatus = if ($p.has_git) { "yes" } else { "no" }
+            $branch = if ($p.branch) { $p.branch } else { "-" }
+            $remote = if ($p.remote_url) { $p.remote_url } else { "-" }
+            Write-Output ("{0,-25} {1,-8} {2,-15} {3}" -f $p.name, $gitStatus, $branch, $remote)
+        }
+    }
+    exit 0
+}
+
 if ($ListFeatures) {
     $features = Get-WorkspaceFeatures
     if ($Json) {

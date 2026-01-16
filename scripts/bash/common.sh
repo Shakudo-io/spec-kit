@@ -221,6 +221,41 @@ list_projects() {
     done
 }
 
+# List projects with detailed git information (repo URL, branch)
+list_projects_detailed() {
+    local workspace_root
+    if ! workspace_root=$(get_workspace_root); then
+        echo "ERROR: Not in a workspace" >&2
+        return 1
+    fi
+    
+    for dir in "$workspace_root"/*/; do
+        [[ -d "$dir" ]] || continue
+        local name
+        name=$(basename "$dir")
+        
+        case "$name" in
+            node_modules|.git|.specify|.opencode|specs|__pycache__|.venv|venv|scripts|templates|memory|docs|media|.*|.claude|.cursor|.github)
+                continue
+                ;;
+        esac
+        
+        if [[ -d "$dir/.git" ]] || [[ -d "$dir/.specify" ]] || git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+            local remote_url=""
+            local branch=""
+            local has_git="false"
+            
+            if git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+                has_git="true"
+                remote_url=$(git -C "$dir" remote get-url origin 2>/dev/null || echo "")
+                branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+            fi
+            
+            printf '%s\t%s\t%s\t%s\n' "$name" "$has_git" "$remote_url" "$branch"
+        fi
+    done
+}
+
 # =============================================================================
 # LEGACY FUNCTIONS (Backward compatible)
 # =============================================================================
