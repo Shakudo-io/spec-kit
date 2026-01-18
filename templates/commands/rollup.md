@@ -60,7 +60,7 @@ $ARGUMENTS
 
 ## Notes
 
-- The rollup scans all project subdirectories for `.specify/specs/` or `specs/` folders
+- The rollup scans the `specs_dir` path configured in `workspace.yaml` (defaults to `specs/` in workspace root), or `.specify/specs/` for legacy single-repo mode
 - Worktrees sharing the same repository are deduplicated by default
 - Use `/speckit.specs` to view the indexed specs in a table format
 - The index is used by other commands to resolve `project:feature` references

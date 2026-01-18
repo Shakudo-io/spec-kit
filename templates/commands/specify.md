@@ -64,7 +64,7 @@ Given that feature description, do this:
    b. Find the highest feature number across all sources for the short-name:
       - Remote branches: `git ls-remote --heads origin | grep -E 'refs/heads/[0-9]+-<short-name>$'`
       - Local branches: `git branch | grep -E '^[* ]*[0-9]+-<short-name>$'`
-      - Specs directories: Check for directories matching `specs/[0-9]+-<short-name>`
+      - Specs directories: Check for directories matching `{specs_dir}/[0-9]+-<short-name>` (where `specs_dir` comes from workspace.yaml or defaults to `specs/`)
 
    c. Determine the next available number:
       - Extract all numbers from all three sources
@@ -117,7 +117,7 @@ Given that feature description, do this:
 
 6. **Specification Quality Validation**: After writing the initial spec, validate it against quality criteria:
 
-   a. **Create Spec Quality Checklist**: Generate a checklist file at `FEATURE_DIR/checklists/requirements.md` using the checklist template structure with these validation items:
+   a. **Create Spec Quality Checklist**: Generate a checklist file at `SPEC_DIR/checklists/requirements.md` (where SPEC_DIR is the spec directory from script output; in legacy mode use FEATURE_DIR) using the checklist template structure with these validation items:
 
       ```markdown
       # Specification Quality Checklist: [FEATURE NAME]

@@ -34,11 +34,13 @@ Note: This clarification workflow is expected to run (and be completed) BEFORE i
 Execution steps:
 
 1. Run `{SCRIPT}` from repo root **once** (combined `--json --paths-only` mode / `-Json -PathsOnly`). Parse minimal JSON payload fields:
-   - `FEATURE_DIR`
-   - `FEATURE_SPEC`
+   - `SPEC_DIR` (or `FEATURE_DIR` in legacy mode) - where spec documents live
+   - `FEATURE_SPEC` - path to spec.md
    - (Optionally capture `IMPL_PLAN`, `TASKS` for future chained flows.)
    - If JSON parsing fails, abort and instruct user to re-run `/speckit.specify` or verify feature branch environment.
    - For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
+   
+   **Workspace mode**: Use `SPEC_DIR` for reading spec documents. In legacy single-repo mode, fall back to `FEATURE_DIR`.
 
 2. Load the current spec file. Perform a structured ambiguity & coverage scan using this taxonomy. For each category, mark status: Clear / Partial / Missing. Produce an internal coverage map used for prioritization (do not output raw map unless no questions will be asked).
 
@@ -169,7 +171,7 @@ Execution steps:
    - Markdown structure valid; only allowed new headings: `## Clarifications`, `### Session YYYY-MM-DD`.
    - Terminology consistency: same canonical term used across all updated sections.
 
-7. Write the updated spec back to `FEATURE_SPEC`.
+7. Write the updated spec back to `FEATURE_SPEC` (located in `SPEC_DIR`).
 
 8. Report completion (after questioning loop ends or early termination):
    - Number of questions asked & answered.
