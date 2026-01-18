@@ -45,6 +45,7 @@ You **MUST** consider the user input before proceeding (if not empty).
    - `SOURCE_BRANCH`: Current branch of SOURCE_DIR
    - `IS_WORKTREE`: Whether SOURCE_DIR is a git worktree
    - `BRANCH_STATUS`: "ok" if on correct branch, "switch_needed" if branch switch required
+   - `CONSTITUTION_PATH`: Absolute path to constitution.md (respects workspace.yaml `constitution_location` setting)
    - `AVAILABLE_DOCS`: List of existing spec documents
    
    **Legacy mode** (no feature shorthand): Uses `FEATURE_DIR` for both specs and source.
@@ -52,9 +53,10 @@ You **MUST** consider the user input before proceeding (if not empty).
    **CRITICAL**: 
    - Read/write spec documents FROM: `SPEC_DIR`
    - Analyze source code FROM: `SOURCE_DIR`
+   - Read constitution FROM: `CONSTITUTION_PATH` (NOT hardcoded `/memory/constitution.md`)
    - If `BRANCH_STATUS` is "switch_needed", warn the user that source directory may need branch switching
 
-2. **Load context**: Read FEATURE_SPEC from `SPEC_DIR` and `/memory/constitution.md`. Load IMPL_PLAN template (already copied).
+2. **Load context**: Read FEATURE_SPEC from `SPEC_DIR` and constitution from `CONSTITUTION_PATH`. Load IMPL_PLAN template (already copied).
 
 3. **Execute plan workflow**: Follow the structure in IMPL_PLAN template to:
    - Fill Technical Context (mark unknowns as "NEEDS CLARIFICATION")

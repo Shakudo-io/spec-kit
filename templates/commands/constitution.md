@@ -6,6 +6,17 @@ handoffs:
     prompt: Implement the feature specification based on the updated constitution. I want to build...
 ---
 
+## Workspace Mode Support
+
+In multi-repository workspaces, the constitution location is determined by `workspace.yaml`:
+- `constitution_location: workspace` (default) → `{workspace}/.specify/memory/constitution.md`
+- `constitution_location: project` → `{project}/.specify/memory/constitution.md`
+
+To resolve the constitution path in workspace mode, run:
+```bash
+source scripts/bash/common.sh && get_constitution_path
+```
+
 ## User Input
 
 ```text
@@ -16,11 +27,15 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 ## Outline
 
-You are updating the project constitution at `/memory/constitution.md`. This file is a TEMPLATE containing placeholder tokens in square brackets (e.g. `[PROJECT_NAME]`, `[PRINCIPLE_1_NAME]`). Your job is to (a) collect/derive concrete values, (b) fill the template precisely, and (c) propagate any amendments across dependent artifacts.
+You are updating the project constitution. The constitution path depends on workspace configuration:
+- **Workspace mode**: Run `source scripts/bash/common.sh && get_constitution_path` to get the absolute path
+- **Single-repo mode**: Use `.specify/memory/constitution.md`
+
+This file is a TEMPLATE containing placeholder tokens in square brackets (e.g. `[PROJECT_NAME]`, `[PRINCIPLE_1_NAME]`). Your job is to (a) collect/derive concrete values, (b) fill the template precisely, and (c) propagate any amendments across dependent artifacts.
 
 Follow this execution flow:
 
-1. Load the existing constitution template at `/memory/constitution.md`.
+1. **Resolve constitution path**: In workspace mode, run `source scripts/bash/common.sh && get_constitution_path` to get the absolute path. Load the existing constitution template from that path.
    - Identify every placeholder token of the form `[ALL_CAPS_IDENTIFIER]`.
    **IMPORTANT**: The user might require less or more principles than the ones used in the template. If a number is specified, respect that - follow the general template. You will update the doc accordingly.
 
@@ -61,7 +76,7 @@ Follow this execution flow:
    - Dates ISO format YYYY-MM-DD.
    - Principles are declarative, testable, and free of vague language ("should" → replace with MUST/SHOULD rationale where appropriate).
 
-7. Write the completed constitution back to `/memory/constitution.md` (overwrite).
+7. Write the completed constitution back to the resolved constitution path (overwrite).
 
 8. Output a final summary to the user with:
    - New version and bump rationale.
@@ -79,4 +94,4 @@ If the user supplies partial updates (e.g., only one principle revision), still 
 
 If critical info missing (e.g., ratification date truly unknown), insert `TODO(<FIELD_NAME>): explanation` and include in the Sync Impact Report under deferred items.
 
-Do not create a new template; always operate on the existing `/memory/constitution.md` file.
+Do not create a new template; always operate on the existing constitution file at the resolved path.

@@ -87,6 +87,59 @@ get_workspace_config() {
     fi
 }
 
+# Parse a YAML list from workspace.yaml
+# Usage: get_workspace_config_list "key"
+# Returns one item per line, empty if key not found or list is empty
+get_workspace_config_list() {
+    local key="$1"
+    
+    local config_file
+    if ! config_file=$(get_workspace_config_file); then
+        return
+    fi
+    
+    # Extract list items following "key:" or "key: []"
+    # Handles both inline empty [] and multi-line list with "  - item" format
+    awk -v key="$key" '
+        BEGIN { in_list = 0 }
+        # Match the key line
+        $0 ~ "^" key ":" {
+            in_list = 1
+            # Check for inline empty array
+            if ($0 ~ /\[\]/) {
+                in_list = 0
+                next
+            }
+            next
+        }
+        # If in list, capture items starting with "  - "
+        in_list && /^[[:space:]]+-[[:space:]]/ {
+            sub(/^[[:space:]]+-[[:space:]]*/, "")
+            sub(/[[:space:]]*$/, "")
+            # Remove quotes if present
+            gsub(/^["'"'"']|["'"'"']$/, "")
+            print
+            next
+        }
+        # Exit list on non-indented line or different key
+        in_list && /^[^[:space:]]/ { in_list = 0 }
+    ' "$config_file"
+}
+
+# Check if a project is archived
+# Usage: is_project_archived "project-name"
+is_project_archived() {
+    local project="$1"
+    local archived
+    archived=$(get_workspace_config_list "archived_projects")
+    
+    if [[ -z "$archived" ]]; then
+        return 1
+    fi
+    
+    echo "$archived" | grep -qx "$project"
+}
+
 # Get the centralized specs directory
 get_specs_dir() {
     if is_workspace_mode; then
@@ -194,8 +247,14 @@ get_project_root() {
     return 1
 }
 
-# List all discovered projects in the workspace
+# List all discovered projects in the workspace (excludes archived projects)
+# Usage: list_projects [--include-archived]
 list_projects() {
+    local include_archived=false
+    if [[ "${1:-}" == "--include-archived" ]]; then
+        include_archived=true
+    fi
+    
     local workspace_root
     if ! workspace_root=$(get_workspace_root); then
         echo "ERROR: Not in a workspace" >&2
@@ -207,14 +266,16 @@ list_projects() {
         local name
         name=$(basename "$dir")
         
-        # Skip excluded patterns and hidden directories
         case "$name" in
             node_modules|.git|.specify|.opencode|specs|__pycache__|.venv|venv|scripts|templates|memory|docs|media|.*|.claude|.cursor|.github)
                 continue
                 ;;
         esac
         
-        # Check if it's a git repo OR has .specify directory (spec-kit initialized)
+        if ! $include_archived && is_project_archived "$name"; then
+            continue
+        fi
+        
         if [[ -d "$dir/.git" ]] || [[ -d "$dir/.specify" ]] || git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
             echo "$name"
         fi
@@ -222,7 +283,13 @@ list_projects() {
 }
 
 # List projects with detailed git information (repo URL, branch, worktree info)
+# Usage: list_projects_detailed [--include-archived]
 list_projects_detailed() {
+    local include_archived=false
+    if [[ "${1:-}" == "--include-archived" ]]; then
+        include_archived=true
+    fi
+    
     local workspace_root
     if ! workspace_root=$(get_workspace_root); then
         echo "ERROR: Not in a workspace" >&2
@@ -239,6 +306,10 @@ list_projects_detailed() {
                 continue
                 ;;
         esac
+        
+        if ! $include_archived && is_project_archived "$name"; then
+            continue
+        fi
         
         if [[ -d "$dir/.git" ]] || [[ -d "$dir/.specify" ]] || git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
             local remote_url=""
@@ -864,6 +935,63 @@ EOF
 
 check_file() { [[ -f "$1" ]] && echo "  ✓ $2" || echo "  ✗ $2"; }
 check_dir() { [[ -d "$1" && -n $(ls -A "$1" 2>/dev/null) ]] && echo "  ✓ $2" || echo "  ✗ $2"; }
+
+# =============================================================================
+# CONSTITUTION PATH RESOLUTION
+# =============================================================================
+
+# Get the path to the constitution file based on workspace.yaml configuration
+# Respects the constitution_location setting: "workspace" or "project"
+# Usage: constitution_path=$(get_constitution_path [project_name])
+# Returns: Absolute path to constitution.md
+get_constitution_path() {
+    local project_name="${1:-}"
+    
+    if is_workspace_mode; then
+        local workspace_root
+        workspace_root=$(get_workspace_root)
+        
+        # Read constitution_location from workspace.yaml (default: workspace)
+        local constitution_location
+        constitution_location=$(get_workspace_config "constitution_location" "workspace")
+        
+        case "$constitution_location" in
+            workspace)
+                # Use shared constitution at workspace level
+                echo "$workspace_root/.specify/memory/constitution.md"
+                ;;
+            project)
+                # Use per-project constitution
+                if [[ -z "$project_name" ]]; then
+                    # Try to detect project from current directory
+                    project_name=$(get_project_name 2>/dev/null || echo "")
+                fi
+                
+                if [[ -n "$project_name" ]]; then
+                    local project_constitution="$workspace_root/$project_name/.specify/memory/constitution.md"
+                    if [[ -f "$project_constitution" ]]; then
+                        echo "$project_constitution"
+                    else
+                        # Fallback to workspace constitution if project doesn't have one
+                        echo "$workspace_root/.specify/memory/constitution.md"
+                    fi
+                else
+                    # No project context, use workspace constitution
+                    echo "$workspace_root/.specify/memory/constitution.md"
+                fi
+                ;;
+            *)
+                # Unknown value, default to workspace
+                echo "$workspace_root/.specify/memory/constitution.md"
+                ;;
+        esac
+    else
+        # Legacy single-repo mode: constitution in repo's .specify/memory/
+        local repo_root
+        repo_root=$(get_repo_root)
+        echo "$repo_root/.specify/memory/constitution.md"
+    fi
+}
 
 # =============================================================================
 # FEATURE SHORTHAND PARSING

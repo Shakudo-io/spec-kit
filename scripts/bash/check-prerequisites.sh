@@ -425,18 +425,19 @@ if $WORKSPACE_INFO; then
         workspace_mode="true"
         workspace_root=$(get_workspace_root)
         
-        # Get projects as JSON array
+        # Get projects as JSON array with source_dir info
         projects=$(list_projects 2>/dev/null || true)
         if [[ -n "$projects" ]]; then
             projects_json='['
             first=true
-            while IFS= read -r project; do
+            while IFS= read -r proj; do
                 if $first; then
                     first=false
                 else
                     projects_json+=','
                 fi
-                projects_json+="\"$project\""
+                proj_source_dir="$workspace_root/$proj"
+                projects_json+="{\"name\":\"$proj\",\"source_dir\":\"$proj_source_dir\"}"
             done <<< "$projects"
             projects_json+=']'
         fi
@@ -448,20 +449,32 @@ if $WORKSPACE_INFO; then
             first=true
             for project_dir in "$specs_dir"/*/; do
                 [[ -d "$project_dir" ]] || continue
-                local project=$(basename "$project_dir")
+                proj=$(basename "$project_dir")
                 
-                for feature_dir in "$project_dir"/*; do
-                    [[ -d "$feature_dir" ]] || continue
-                    local feature=$(basename "$feature_dir")
+                for feat_dir in "$project_dir"/*; do
+                    [[ -d "$feat_dir" ]] || continue
+                    feat=$(basename "$feat_dir")
                     
-                    if [[ "$feature" =~ ^([0-9]{3})- ]]; then
-                        local num="${BASH_REMATCH[1]}"
+                    if [[ "$feat" =~ ^([0-9]{3})- ]]; then
+                        num="${BASH_REMATCH[1]}"
                         if $first; then
                             first=false
                         else
                             features_json+=','
                         fi
-                        features_json+="\"$project-$num\""
+                        
+                        # Resolve source directory for this feature
+                        feat_source_dir=""
+                        feat_source_branch=""
+                        feat_is_worktree="false"
+                        if source_result=$(resolve_source_dir "$proj" "$feat" 2>/dev/null); then
+                            eval "$source_result"
+                            feat_source_dir="$SOURCE_DIR"
+                            feat_source_branch="$SOURCE_BRANCH"
+                            feat_is_worktree="$IS_WORKTREE"
+                        fi
+                        
+                        features_json+="{\"shorthand\":\"$proj-$num\",\"project\":\"$proj\",\"feature\":\"$feat\",\"spec_dir\":\"$feat_dir\",\"source_dir\":\"$feat_source_dir\",\"source_branch\":\"$feat_source_branch\",\"is_worktree\":$feat_is_worktree}"
                     fi
                 done
             done
@@ -558,6 +571,14 @@ if $INCLUDE_TASKS && [[ -f "$TASKS" ]]; then
     docs+=("tasks.md")
 fi
 
+# Resolve constitution path based on workspace.yaml configuration
+CONSTITUTION_PATH=""
+if [[ -n "$SHORTHAND_PROJECT" ]]; then
+    CONSTITUTION_PATH=$(get_constitution_path "$SHORTHAND_PROJECT")
+else
+    CONSTITUTION_PATH=$(get_constitution_path)
+fi
+
 # Output results
 if $JSON_MODE; then
     if [[ ${#docs[@]} -eq 0 ]]; then
@@ -567,17 +588,16 @@ if $JSON_MODE; then
         json_docs="[${json_docs%,}]"
     fi
     
-    # Include source directory info if resolved (workspace mode with feature shorthand)
     if [[ -n "$RESOLVED_SOURCE_DIR" ]]; then
         eval "$RESOLVED_SOURCE_INFO"
-        printf '{"SPEC_DIR":"%s","SOURCE_DIR":"%s","SOURCE_BRANCH":"%s","IS_WORKTREE":%s,"EXPECTED_BRANCH":"%s","BRANCH_STATUS":"%s","AVAILABLE_DOCS":%s}\n' \
-            "$FEATURE_DIR" "$SOURCE_DIR" "$SOURCE_BRANCH" "$IS_WORKTREE" "$EXPECTED_BRANCH" "$BRANCH_STATUS" "$json_docs"
+        printf '{"SPEC_DIR":"%s","SOURCE_DIR":"%s","SOURCE_BRANCH":"%s","IS_WORKTREE":%s,"EXPECTED_BRANCH":"%s","BRANCH_STATUS":"%s","CONSTITUTION_PATH":"%s","AVAILABLE_DOCS":%s}\n' \
+            "$FEATURE_DIR" "$SOURCE_DIR" "$SOURCE_BRANCH" "$IS_WORKTREE" "$EXPECTED_BRANCH" "$BRANCH_STATUS" "$CONSTITUTION_PATH" "$json_docs"
     else
-        # Legacy output format (backward compatible)
-        printf '{"FEATURE_DIR":"%s","AVAILABLE_DOCS":%s}\n' "$FEATURE_DIR" "$json_docs"
+        printf '{"FEATURE_DIR":"%s","CONSTITUTION_PATH":"%s","AVAILABLE_DOCS":%s}\n' "$FEATURE_DIR" "$CONSTITUTION_PATH" "$json_docs"
     fi
 else
     echo "SPEC_DIR: $FEATURE_DIR"
+    echo "CONSTITUTION_PATH: $CONSTITUTION_PATH"
     
     if [[ -n "$RESOLVED_SOURCE_DIR" ]]; then
         eval "$RESOLVED_SOURCE_INFO"
