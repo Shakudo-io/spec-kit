@@ -7,11 +7,14 @@ scripts:
 
 ## Workspace Mode Support
 
-In multi-repository workspaces with `workspace.yaml`, you can specify features using shorthand:
+In multi-repository workspaces, you can specify features using two formats:
 
-- **Feature shorthand**: `/speckit.checklist monorepo-001 UX requirements` - generates checklist for feature 001
-- **List features**: Run `scripts/bash/check-prerequisites.sh --list-features` to see all available features
-- The script outputs `WORKSPACE_MODE`, `PROJECT_NAME`, and `PROJECT_ROOT` in JSON for context
+- **Legacy shorthand**: `/speckit.checklist monorepo-001 UX requirements` - generates checklist for feature 001 in the monorepo project
+- **Workspace spec ID**: `/speckit.checklist monorepo:001-user-auth UX requirements` - uses the rollup index to resolve the full path
+- **From project directory**: If you're inside a project's git repo, the project is auto-detected
+- **List all specs**: Run `/speckit.specs` or `scripts/bash/check-prerequisites.sh --list-specs` to see available specs
+
+The `project:feature` format uses the workspace specs index (`.specify/specs-index.json`) for resolution. Run `/speckit.rollup` first to generate the index.
 
 ## Checklist Purpose: "Unit Tests for English"
 
@@ -44,10 +47,20 @@ You **MUST** consider the user input before proceeding (if not empty).
 
 ## Execution Steps
 
-1. **Setup**: Run `{SCRIPT}` from repo root and parse JSON for SPEC_DIR (or FEATURE_DIR in legacy mode) and AVAILABLE_DOCS list.
+1. **Setup**: Run `{SCRIPT}` from repo root and parse the JSON payload fields:
+   
+   **JSON fields (workspace mode with feature shorthand)**:
+   - `SPEC_DIR`: Where spec documents live (spec.md, plan.md, tasks.md, etc.)
+   - `SOURCE_DIR`: Where source code lives (for writing code changes)
+   - `SOURCE_BRANCH`: Current branch of SOURCE_DIR
+   - `IS_WORKTREE`: Whether SOURCE_DIR is a git worktree
+   - `CONSTITUTION_PATH`: Absolute path to constitution.md
+   - `AVAILABLE_DOCS`: List of existing spec documents
+   
+   **Legacy mode** (single-repo without workspace.yaml): Uses `FEATURE_DIR` instead of `SPEC_DIR`.
+   
    - All file paths must be absolute.
    - For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
-   - **Workspace mode**: Use `SPEC_DIR` for reading/writing spec documents. In legacy single-repo mode, fall back to `FEATURE_DIR`.
 
 2. **Clarify intent (dynamic)**: Derive up to THREE initial contextual clarifying questions (no pre-baked catalog). They MUST:
    - Be generated from the user's phrasing + extracted signals from spec/plan/tasks

@@ -11,11 +11,14 @@ scripts:
 
 ## Workspace Mode Support
 
-In multi-repository workspaces with `workspace.yaml`, you can specify features using shorthand:
+In multi-repository workspaces, you can specify features using two formats:
 
-- **Feature shorthand**: `/speckit.clarify monorepo-001` - clarifies feature 001 in the monorepo project
-- **List features**: Run `scripts/bash/check-prerequisites.sh --list-features` to see all available features
-- The script outputs `WORKSPACE_MODE`, `PROJECT_NAME`, and `PROJECT_ROOT` in JSON for context
+- **Legacy shorthand**: `/speckit.clarify monorepo-001` - clarifies feature 001 in the monorepo project
+- **Workspace spec ID**: `/speckit.clarify monorepo:001-user-auth` - uses the rollup index to resolve the full path
+- **From project directory**: If you're inside a project's git repo, the project is auto-detected
+- **List all specs**: Run `/speckit.specs` or `scripts/bash/check-prerequisites.sh --list-specs` to see available specs
+
+The `project:feature` format uses the workspace specs index (`.specify/specs-index.json`) for resolution. Run `/speckit.rollup` first to generate the index.
 
 ## User Input
 
@@ -33,14 +36,20 @@ Note: This clarification workflow is expected to run (and be completed) BEFORE i
 
 Execution steps:
 
-1. Run `{SCRIPT}` from repo root **once** (combined `--json --paths-only` mode / `-Json -PathsOnly`). Parse minimal JSON payload fields:
-   - `SPEC_DIR` (or `FEATURE_DIR` in legacy mode) - where spec documents live
-   - `FEATURE_SPEC` - path to spec.md
-   - (Optionally capture `IMPL_PLAN`, `TASKS` for future chained flows.)
+1. Run `{SCRIPT}` from repo root **once** (combined `--json --paths-only` mode / `-Json -PathsOnly`). Parse the JSON payload fields:
+   
+   **JSON fields (workspace mode with feature shorthand)**:
+   - `SPEC_DIR`: Where spec documents live (spec.md, plan.md, tasks.md, etc.)
+   - `SOURCE_DIR`: Where source code lives (for writing code changes)
+   - `SOURCE_BRANCH`: Current branch of SOURCE_DIR
+   - `IS_WORKTREE`: Whether SOURCE_DIR is a git worktree
+   - `CONSTITUTION_PATH`: Absolute path to constitution.md
+   - `AVAILABLE_DOCS`: List of existing spec documents
+   
+   **Legacy mode** (single-repo without workspace.yaml): Uses `FEATURE_DIR` instead of `SPEC_DIR`.
+   
    - If JSON parsing fails, abort and instruct user to re-run `/speckit.specify` or verify feature branch environment.
    - For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
-   
-   **Workspace mode**: Use `SPEC_DIR` for reading spec documents. In legacy single-repo mode, fall back to `FEATURE_DIR`.
 
 2. Load the current spec file. Perform a structured ambiguity & coverage scan using this taxonomy. For each category, mark status: Clear / Partial / Missing. Produce an internal coverage map used for prioritization (do not output raw map unless no questions will be asked).
 
