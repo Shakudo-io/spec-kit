@@ -7,11 +7,14 @@ scripts:
 
 ## Workspace Mode Support
 
-In multi-repository workspaces with `workspace.yaml`, you can specify features using shorthand:
+In multi-repository workspaces, you can specify features using two formats:
 
-- **Feature shorthand**: `/speckit.analyze monorepo-001` - analyzes feature 001 in the monorepo project
-- **List features**: Run `scripts/bash/check-prerequisites.sh --list-features` to see all available features
-- The script outputs `WORKSPACE_MODE`, `PROJECT_NAME`, and `PROJECT_ROOT` in JSON for context
+- **Legacy shorthand**: `/speckit.analyze monorepo-001` - analyzes feature 001 in the monorepo project
+- **Workspace spec ID**: `/speckit.analyze monorepo:001-user-auth` - uses the rollup index to resolve the full path
+- **From project directory**: If you're inside a project's git repo, the project is auto-detected
+- **List all specs**: Run `/speckit.specs` or `scripts/bash/check-prerequisites.sh --list-specs` to see available specs
+
+The `project:feature` format uses the workspace specs index (`.specify/specs-index.json`) for resolution. Run `/speckit.rollup` first to generate the index.
 
 ## User Input
 
@@ -35,16 +38,25 @@ Identify inconsistencies, duplications, ambiguities, and underspecified items ac
 
 ### 1. Initialize Analysis Context
 
-Run `{SCRIPT}` once from repo root and parse JSON for SPEC_DIR (or FEATURE_DIR in legacy mode) and AVAILABLE_DOCS. Derive absolute paths:
+Run `{SCRIPT}` once from repo root and parse JSON output. For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
+
+**JSON fields (workspace mode with feature shorthand)**:
+- `SPEC_DIR`: Where spec documents live (spec.md, plan.md, tasks.md, etc.)
+- `SOURCE_DIR`: Where source code lives (for referencing implementation context)
+- `SOURCE_BRANCH`: Current branch of SOURCE_DIR
+- `IS_WORKTREE`: Whether SOURCE_DIR is a git worktree
+- `CONSTITUTION_PATH`: Absolute path to constitution.md
+- `AVAILABLE_DOCS`: List of existing spec documents
+
+**Legacy mode** (single-repo without workspace.yaml): Uses `FEATURE_DIR` instead of `SPEC_DIR`.
+
+Derive absolute paths from SPEC_DIR (or FEATURE_DIR in legacy mode):
 
 - SPEC = SPEC_DIR/spec.md
 - PLAN = SPEC_DIR/plan.md
 - TASKS = SPEC_DIR/tasks.md
 
-**Workspace mode**: Use `SPEC_DIR` for reading spec documents. In legacy single-repo mode, fall back to `FEATURE_DIR`.
-
 Abort with an error message if any required file is missing (instruct the user to run missing prerequisite command).
-For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
 
 ### 2. Load Artifacts (Progressive Disclosure)
 
