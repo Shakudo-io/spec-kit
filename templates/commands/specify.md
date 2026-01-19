@@ -13,14 +13,20 @@ scripts:
   ps: scripts/powershell/create-new-feature.ps1 -Json "{ARGS}"
 ---
 
-## Workspace Mode Support
+## Workspace Mode Support (1-1-1 Alignment)
 
-This command supports multi-repository workspaces. When a `workspace.yaml` exists in the workspace root:
+This command supports multi-repository workspaces with **1-1-1 alignment**: one branch, one worktree, one spec folder.
+
+When a `workspace.yaml` exists in the workspace root:
 
 - **Use `--project <name>`** to specify the target repository (e.g., `/speckit.specify --project monorepo Add user auth`)
-- **Branch naming**: `{project}-{number}-{feature}` (e.g., `monorepo-001-user-auth`)
-- **Spec location**: `{workspace}/specs/{project}/{number}-{feature}/`
-- **After creation**: The spec is indexed automatically. Reference it using:
+- **Creates three aligned artifacts**:
+  - **Branch**: `{project}-{number}-{feature}` (e.g., `monorepo-001-user-auth`) - created in project repo
+  - **Worktree**: `{workspace}/{project}-{number}-{feature}/` - isolated working directory at workspace root
+  - **Spec folder**: `{workspace}/specs/{project}/{number}-{feature}/` - centralized spec location
+- **Project repo stays on main**: The original project directory remains on its current branch (typically main)
+- **Development happens in worktree**: All code changes occur in the worktree directory
+- **After creation**: Reference the feature using:
   - **Legacy shorthand**: `{project}-{number}` (e.g., `monorepo-001`)
   - **Workspace spec ID**: `{project}:{feature}` (e.g., `monorepo:001-user-auth`)
 - **List all specs**: Run `/speckit.specs` to see all indexed specs across the workspace
@@ -82,7 +88,8 @@ Given that feature description, do this:
    - If no existing branches/directories found with this short-name, start with number 1
    - You must only ever run this script once per feature
    - The JSON is provided in the terminal as output - always refer to it to get the actual content you're looking for
-   - The JSON output will contain BRANCH_NAME and SPEC_FILE paths
+   - The JSON output will contain BRANCH_NAME, SPEC_FILE, and WORKTREE_DIR (workspace mode only)
+   - **In workspace mode**: Navigate to WORKTREE_DIR for development, not PROJECT_ROOT
    - For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot")
 
 3. Load `templates/spec-template.md` to understand required sections.
@@ -209,7 +216,7 @@ Given that feature description, do this:
 
 7. Report completion with branch name, spec file path, checklist results, and readiness for the next phase (`/speckit.clarify` or `/speckit.plan`).
 
-**NOTE:** The script creates and checks out the new branch and initializes the spec file before writing.
+**NOTE:** In workspace mode, the script creates a git worktree at workspace root level (1-1-1 alignment). The project repo stays on its current branch. In legacy mode (no workspace.yaml), it creates and checks out the branch directly.
 
 ## General Guidelines
 

@@ -2,7 +2,7 @@
 #
 # create-new-feature.sh - Create a new feature branch with spec directory
 #
-# Version: 2.0.0 - Multi-repository workspace support
+# Version: 3.0.0 - 1-1-1 worktree alignment (branch + worktree + spec folder)
 #
 # Usage:
 #   ./create-new-feature.sh [OPTIONS] <feature_description>
@@ -96,13 +96,14 @@ OPTIONS:
   --json                Output in JSON format
   --help, -h            Show this help
 
-WORKSPACE MODE (multi-repo):
+WORKSPACE MODE (multi-repo with 1-1-1 alignment):
   When a workspace.yaml exists, you must specify --project:
   
   ./create-new-feature.sh --project monorepo "Add feature" --short-name my-feature
   
-  Creates:
+  Creates (1-1-1 alignment):
     - Branch: monorepo-001-my-feature (in monorepo repo)
+    - Worktree: {workspace}/monorepo-001-my-feature/
     - Specs: {workspace}/specs/monorepo/001-my-feature/
 
 LEGACY MODE (single repo):
@@ -445,20 +446,57 @@ if [ ${#BRANCH_NAME} -gt $MAX_BRANCH_LENGTH ]; then
 fi
 
 # =============================================================================
-# CREATE BRANCH AND SPEC DIRECTORY
+# CREATE BRANCH AND WORKTREE (1-1-1 ALIGNMENT)
 # =============================================================================
+
+# Determine worktree directory
+# In workspace mode: worktree at workspace root level
+# In legacy mode: no worktree (branch checkout only for backwards compatibility)
+WORKTREE_DIR=""
+
+if [ "$WORKSPACE_MODE" = true ]; then
+    WORKTREE_DIR="$WORKSPACE_ROOT/$BRANCH_NAME"
+fi
 
 # Change to project directory for git operations
 cd "$PROJECT_ROOT"
 
-# Create branch
+# Create branch and worktree (workspace mode) or just branch (legacy mode)
 if [ "$HAS_GIT" = true ]; then
-    # Check if branch already exists
-    if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME" 2>/dev/null; then
-        >&2 echo "[specify] Branch $BRANCH_NAME already exists, switching to it"
-        git checkout "$BRANCH_NAME"
+    if [ "$WORKSPACE_MODE" = true ]; then
+        # =================================================================
+        # WORKSPACE MODE: Use git worktree for 1-1-1 alignment
+        # - Keep project repo on its current branch (typically main)
+        # - Create worktree at workspace root for isolated development
+        # =================================================================
+        
+        if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME" 2>/dev/null; then
+            # Branch exists - check if worktree already exists
+            if [ -d "$WORKTREE_DIR" ]; then
+                >&2 echo "[specify] Worktree already exists at $WORKTREE_DIR"
+            else
+                # Branch exists but no worktree - add worktree for existing branch
+                >&2 echo "[specify] Creating worktree for existing branch $BRANCH_NAME"
+                git worktree add "$WORKTREE_DIR" "$BRANCH_NAME"
+            fi
+        else
+            # Create new branch via worktree (atomic operation)
+            >&2 echo "[specify] Creating branch $BRANCH_NAME with worktree at $WORKTREE_DIR"
+            git worktree add -b "$BRANCH_NAME" "$WORKTREE_DIR"
+        fi
+        
+        # NOTE: Project repo stays on its current branch (main)
+        # Development happens in the worktree directory
     else
-        git checkout -b "$BRANCH_NAME"
+        # =================================================================
+        # LEGACY MODE: Direct branch checkout (backwards compatibility)
+        # =================================================================
+        if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME" 2>/dev/null; then
+            >&2 echo "[specify] Branch $BRANCH_NAME already exists, switching to it"
+            git checkout "$BRANCH_NAME"
+        else
+            git checkout -b "$BRANCH_NAME"
+        fi
     fi
 else
     >&2 echo "[specify] Warning: Git not available; skipped branch creation for $BRANCH_NAME"
@@ -508,6 +546,10 @@ export SPECIFY_FEATURE="$BRANCH_NAME"
 # =============================================================================
 
 if $JSON_MODE; then
+    WORKTREE_DIR_JSON="${WORKTREE_DIR:-null}"
+    if [ -n "$WORKTREE_DIR" ]; then
+        WORKTREE_DIR_JSON="\"$WORKTREE_DIR\""
+    fi
     cat << EOF
 {
   "BRANCH_NAME": "$BRANCH_NAME",
@@ -517,17 +559,19 @@ if $JSON_MODE; then
   "PROJECT_NAME": "$PROJECT_NAME",
   "PROJECT_ROOT": "$PROJECT_ROOT",
   "WORKSPACE_MODE": $WORKSPACE_MODE,
-  "SPECS_DIR": "$SPECS_DIR"
+  "SPECS_DIR": "$SPECS_DIR",
+  "WORKTREE_DIR": $WORKTREE_DIR_JSON
 }
 EOF
 else
     echo ""
     echo "=============================================="
-    echo "  FEATURE CREATED"
+    echo "  FEATURE CREATED (1-1-1 Alignment)"
     echo "=============================================="
     echo ""
     if [ "$WORKSPACE_MODE" = true ]; then
         echo "  Project:     $PROJECT_NAME"
+        echo "  Worktree:    $WORKTREE_DIR"
     fi
     echo "  Branch:      $BRANCH_NAME"
     echo "  Spec File:   $SPEC_FILE"
@@ -535,7 +579,11 @@ else
     echo ""
     echo "  NEXT STEPS:"
     echo "  ─────────────────────────────────────────"
-    echo "  cd $PROJECT_ROOT"
+    if [ "$WORKSPACE_MODE" = true ] && [ -n "$WORKTREE_DIR" ]; then
+        echo "  cd $WORKTREE_DIR"
+    else
+        echo "  cd $PROJECT_ROOT"
+    fi
     echo "  # Edit the spec, then run:"
     echo "  /speckit.plan"
     echo "  /speckit.tasks"
