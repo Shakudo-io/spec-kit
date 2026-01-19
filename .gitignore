@@ -44,3 +44,8 @@ env/
 .genreleases/
 *.zip
 sdd-*/
+
+# Local spec-kit initialization (created by specify init --here)
+.specify/
+.opencode/
+

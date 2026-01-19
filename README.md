@@ -279,6 +279,7 @@ Commands for managing specs across multiple repositories in a workspace:
 | `/speckit.rollup`   | Scan workspace and generate a specs index across all projects         |
 | `/speckit.specs`    | List all specs in the workspace with status (spec/plan/tasks)         |
 | `/speckit.projects` | List all projects in the workspace with git info                      |
+| `/speckit.archive`  | Archive or unarchive a project to hide it from workspace listings     |
 
 **Workspace mode** allows you to manage specifications across multiple repositories from a single location. See [Multi-Repository Workspaces](#multi-repository-workspaces) for details.
 
@@ -705,6 +706,9 @@ This creates the spec in the correct project directory and updates the workspace
 | `/speckit.rollup` | Regenerate the specs index |
 | `/speckit.specs` | List all specs with status |
 | `/speckit.projects` | List all projects with git info |
+| `/speckit.archive <project>` | Archive a project (hide from listings) |
+| `/speckit.archive --unarchive <project>` | Unarchive a project |
+| `/speckit.archive --list` | List all archived projects |
 | `--force-refresh` | Force index regeneration |
 | `--include-worktrees` | Include git worktrees (disabled by default to avoid duplicates) |
 

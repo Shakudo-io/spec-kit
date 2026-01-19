@@ -7,6 +7,18 @@ All notable changes to the Specify CLI and templates are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.25] - 2026-01-16
+
+### Added
+
+- **Project archiving**: New `/speckit.archive` command to hide projects from workspace listings
+  - Archive projects: `/speckit.archive <project>`
+  - Unarchive projects: `/speckit.archive --unarchive <project>`
+  - List archived: `/speckit.archive --list`
+  - Archived projects are excluded from `/speckit.workspace`, `/speckit.projects`, `/speckit.rollup`, and `/speckit.specs`
+  - Configuration stored in `workspace.yaml` under `archived_projects` list
+  - Non-destructive: archived projects remain on disk
+
 ## [0.0.24] - 2026-01-16
 
 ### Added

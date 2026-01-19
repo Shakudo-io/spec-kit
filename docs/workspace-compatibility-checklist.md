@@ -43,8 +43,8 @@ Every feature MUST have exactly:
 
 ## LOW Priority - Script Hardening
 
-- [ ] `scripts/bash/common.sh:805,819` - Branch regex `^([a-z0-9_-]+)-[0-9]{3}-` might misidentify projects with hyphens in their names
-- [ ] `scripts/bash/create-new-feature.sh:411` - `SPEC_DIR_NAME` set separately from `BRANCH_NAME`; in 1-1-1 these should match exactly
+- [x] `scripts/bash/common.sh:805,819` - Branch regex `^([a-z0-9_-]+)-[0-9]{3}-` ✅ VERIFIED: Greedy `+` quantifier correctly matches everything before the LAST `-NNN-` pattern (e.g., `my-cool-project-001-feature` → `my-cool-project`)
+- [x] `scripts/bash/create-new-feature.sh:411` - `SPEC_DIR_NAME` set separately from `BRANCH_NAME` ✅ VERIFIED: Correct per 1-1-1 invariant - spec folder is `{NNN}-{feature}` stored under `specs/{project}/`
 
 ## Constitution Path Resolution
 

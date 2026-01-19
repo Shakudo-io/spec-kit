@@ -34,8 +34,15 @@ This command provides workspace status and discovery information for multi-repos
 3. **Parse and Display Results**: The script returns JSON with:
    - `workspace_mode`: Boolean indicating if workspace mode is active
    - `workspace_root`: Path to workspace root directory
-   - `projects`: Array of detected project names
-   - `features`: Array of feature shorthands (e.g., `myrepo-001`)
+   - `projects`: Array of objects with `name` and `source_dir` (where code lives)
+   - `features`: Array of objects with:
+     - `shorthand`: Feature reference (e.g., `myrepo-001`)
+     - `project`: Project name
+     - `feature`: Full feature name (e.g., `001-feature-name`)
+     - `spec_dir`: Where specs are stored (centralized)
+     - `source_dir`: Where code changes should be made (worktree or main checkout)
+     - `source_branch`: Current branch at source location
+     - `is_worktree`: Boolean indicating if source is a git worktree
 
 4. **Handle User Arguments**: If the user provided arguments (in `$ARGUMENTS`), interpret them:
 
@@ -57,18 +64,19 @@ This command provides workspace status and discovery information for multi-repos
    **Mode**: Multi-repository workspace
    
    ### Projects ({count})
-   | Project | Status | Features |
-   |---------|--------|----------|
-   | {project} | {has_git ? "Git" : "No Git"} | {feature_count} |
+   | Project | Source Directory |
+   |---------|------------------|
+   | {project.name} | {project.source_dir} |
    
    ### Features ({count})
-   | Shorthand | Project | Branch | Status |
-   |-----------|---------|--------|--------|
-   | {shorthand} | {project} | {branch_name} | {exists ? "Active" : "Pending"} |
+   | Shorthand | Project | Source | Branch | Worktree |
+   |-----------|---------|--------|--------|----------|
+   | {shorthand} | {project} | {source_dir} | {source_branch} | {is_worktree ? "Yes" : "No"} |
    
    ### Quick Commands
    - Create feature: `/speckit.specify --project <name> <description>`
    - Work on feature: `/speckit.plan <shorthand>`, `/speckit.tasks <shorthand>`
+   - Archive project: `/speckit.archive <project>`
    - List projects: `.specify/scripts/bash/check-prerequisites.sh --list-projects`
    ```
 
@@ -92,13 +100,21 @@ This command provides workspace status and discovery information for multi-repos
    {
      "workspace_mode": true,
      "workspace_root": "/path/to/workspace",
-     "projects": ["repo-a", "repo-b", "repo-c"],
-     "features": [
-       {"shorthand": "repo-a-001", "project": "repo-a", "name": "001-feature-name"},
-       {"shorthand": "repo-b-001", "project": "repo-b", "name": "001-other-feature"}
+     "projects": [
+       {"name": "repo-a", "source_dir": "/path/to/workspace/repo-a"},
+       {"name": "repo-b", "source_dir": "/path/to/workspace/repo-b"}
      ],
-     "current_project": null,
-     "current_feature": null
+     "features": [
+       {
+         "shorthand": "repo-a-001",
+         "project": "repo-a",
+         "feature": "001-feature-name",
+         "spec_dir": "/path/to/workspace/specs/repo-a/001-feature-name",
+         "source_dir": "/path/to/workspace/repo-a-001-feature-name",
+         "source_branch": "repo-a-001-feature-name",
+         "is_worktree": true
+       }
+     ]
    }
    ```
 

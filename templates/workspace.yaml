@@ -51,6 +51,17 @@ no_project_behavior: error
 # Default: workspace
 constitution_location: workspace
 
+# Archived Projects
+# -----------------
+# Projects listed here are excluded from workspace discovery, rollups,
+# and spec listings. Use /speckit.archive to manage this list.
+# Archived projects remain on disk but are hidden from active workflows.
+# Example:
+#   archived_projects:
+#     - old-backend-api
+#     - deprecated-service
+archived_projects: []
+
 # ============================================================
 # PROJECT DISCOVERY
 # ============================================================
