@@ -165,10 +165,10 @@ if is_workspace_mode; then
     fi
     
     if [ -z "$PROJECT_NAME" ]; then
-        # Try to detect from current directory
-        if git rev-parse --show-toplevel >/dev/null 2>&1; then
+        # Try to detect from current directory using worktree-aware function
+        PROJECT_NAME=$(get_project_name)
+        if [ -n "$PROJECT_NAME" ] && git rev-parse --show-toplevel >/dev/null 2>&1; then
             PROJECT_ROOT=$(git rev-parse --show-toplevel)
-            PROJECT_NAME=$(basename "$PROJECT_ROOT")
         fi
     fi
     
@@ -214,7 +214,7 @@ else
             exit 1
         fi
     fi
-    PROJECT_NAME=$(basename "$PROJECT_ROOT")
+    PROJECT_NAME=$(get_project_name)
 fi
 
 # =============================================================================

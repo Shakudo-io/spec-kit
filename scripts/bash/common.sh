@@ -177,6 +177,8 @@ get_specs_dir() {
 # =============================================================================
 
 # Get project name from environment or current directory
+# Handles git worktrees correctly by extracting project name from 1-1-1 pattern
+# or resolving to main repo via git-common-dir
 get_project_name() {
     # Check explicit env var first
     if [[ -n "${SPECIFY_PROJECT:-}" ]]; then
@@ -188,7 +190,39 @@ get_project_name() {
     if git rev-parse --show-toplevel >/dev/null 2>&1; then
         local repo_root
         repo_root=$(git rev-parse --show-toplevel)
-        basename "$repo_root"
+        local name
+        name=$(basename "$repo_root")
+        
+        # Check if we're in a worktree (git-common-dir differs from git-dir parent)
+        local git_dir common_dir
+        git_dir=$(git rev-parse --git-dir 2>/dev/null)
+        common_dir=$(git rev-parse --git-common-dir 2>/dev/null)
+        
+        # Normalize paths for comparison
+        git_dir=$(cd "$(dirname "$git_dir")" 2>/dev/null && pwd)/$(basename "$git_dir")
+        common_dir=$(cd "$common_dir" 2>/dev/null && pwd)
+        
+        # Check if this is a worktree by seeing if git-common-dir points elsewhere
+        if [[ "$git_dir" == *"/.git/worktrees/"* ]] || [[ "$common_dir" != "${git_dir%/.git}/.git" && "$common_dir" != "$git_dir" ]]; then
+            # We're in a worktree. Try to extract project name from 1-1-1 pattern first
+            # Pattern: {project}-{NNN}-{feature} where NNN is 3 digits
+            if [[ "$name" =~ ^([a-zA-Z0-9_-]+)-[0-9]{3}-[a-zA-Z0-9_-]+$ ]]; then
+                echo "${BASH_REMATCH[1]}"
+                return 0
+            fi
+            
+            # Fallback: resolve to main repo using git-common-dir
+            # common_dir is typically /path/to/main-repo/.git
+            local main_repo
+            main_repo="${common_dir%/.git}"
+            if [[ -d "$main_repo" ]]; then
+                basename "$main_repo"
+                return 0
+            fi
+        fi
+        
+        # Not a worktree or fallback failed - use basename directly
+        echo "$name"
         return 0
     fi
     
