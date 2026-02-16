@@ -1328,6 +1328,486 @@ resolve_source_dir_json() {
 # FEATURE NUMBER GENERATION
 # =============================================================================
 
+# =============================================================================
+# 1-1-1 ALIGNMENT AUDIT FUNCTIONS
+# =============================================================================
+
+# Alignment status constants
+readonly ALIGN_OK="OK"                          # Branch + worktree + spec all exist and match
+readonly ALIGN_ORPHAN_SPEC="ORPHAN_SPEC"        # Spec exists but no branch (may be merged)
+readonly ALIGN_MISSING_WORKTREE="MISSING_WT"    # Branch exists but no worktree
+readonly ALIGN_MISSING_SPEC="MISSING_SPEC"      # Branch/worktree exist but no spec
+readonly ALIGN_DISTRIBUTED="DISTRIBUTED"        # Spec is in repo instead of centralized location
+readonly ALIGN_WRONG_BRANCH="WRONG_BRANCH"      # Spec exists but points to wrong branch in index
+readonly ALIGN_MERGED="MERGED"                  # Feature was merged to main/dev (not an error)
+
+# Check if a branch was merged to main/dev
+# Usage: was_feature_merged "project_root" "branch_name"
+# Returns: 0 if merged, 1 if not merged
+was_feature_merged() {
+    local project_root="$1"
+    local branch_name="$2"
+    local feature_name="${3:-}"  # Optional: feature name for grep fallback
+    
+    [[ -d "$project_root" ]] || return 1
+    git -C "$project_root" rev-parse --git-dir >/dev/null 2>&1 || return 1
+    
+    # Method 1: Check if branch ref exists in merge commits on main/dev
+    # This works for standard merge commits
+    for base_branch in main dev master; do
+        if git -C "$project_root" rev-parse --verify "origin/$base_branch" >/dev/null 2>&1; then
+            # Check for merge commits mentioning the branch
+            local merge_commit
+            merge_commit=$(git -C "$project_root" log --oneline --merges --grep="$branch_name" "origin/$base_branch" 2>/dev/null | head -1)
+            if [[ -n "$merge_commit" ]]; then
+                return 0
+            fi
+            
+            # Also try feature name if provided
+            if [[ -n "$feature_name" ]]; then
+                merge_commit=$(git -C "$project_root" log --oneline --merges --grep="$feature_name" "origin/$base_branch" 2>/dev/null | head -1)
+                if [[ -n "$merge_commit" ]]; then
+                    return 0
+                fi
+            fi
+        fi
+    done
+    
+    # Method 2: Check if branch was squash-merged (no merge commit, but PR title in commit message)
+    # Look for commits on main/dev with the branch name in the message
+    for base_branch in main dev master; do
+        if git -C "$project_root" rev-parse --verify "origin/$base_branch" >/dev/null 2>&1; then
+            local squash_commit
+            squash_commit=$(git -C "$project_root" log --oneline --grep="$branch_name" "origin/$base_branch" 2>/dev/null | head -1)
+            if [[ -n "$squash_commit" ]]; then
+                return 0
+            fi
+            
+            if [[ -n "$feature_name" ]]; then
+                squash_commit=$(git -C "$project_root" log --oneline --grep="$feature_name" "origin/$base_branch" 2>/dev/null | head -1)
+                if [[ -n "$squash_commit" ]]; then
+                    return 0
+                fi
+            fi
+        fi
+    done
+    
+    return 1
+}
+
+# Check if a branch exists (locally or remote)
+# Usage: branch_exists "project_root" "branch_name"
+branch_exists() {
+    local project_root="$1"
+    local branch_name="$2"
+    
+    [[ -d "$project_root" ]] || return 1
+    git -C "$project_root" rev-parse --git-dir >/dev/null 2>&1 || return 1
+    
+    # Check local branches
+    if git -C "$project_root" show-ref --verify --quiet "refs/heads/$branch_name" 2>/dev/null; then
+        return 0
+    fi
+    
+    # Check remote branches
+    if git -C "$project_root" show-ref --verify --quiet "refs/remotes/origin/$branch_name" 2>/dev/null; then
+        return 0
+    fi
+    
+    return 1
+}
+
+# Check if a worktree exists for a given branch
+# Usage: worktree_exists "project_root" "branch_name"
+# Returns: 0 if exists, 1 if not. Outputs worktree path to stdout if found.
+worktree_exists() {
+    local project_root="$1"
+    local branch_name="$2"
+    
+    [[ -d "$project_root" ]] || return 1
+    git -C "$project_root" rev-parse --git-dir >/dev/null 2>&1 || return 1
+    
+    local worktree_path=""
+    while IFS= read -r line; do
+        if [[ "$line" == "worktree "* ]]; then
+            local wt_dir="${line#worktree }"
+            local wt_branch
+            wt_branch=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+            if [[ "$wt_branch" == "$branch_name" ]]; then
+                echo "$wt_dir"
+                return 0
+            fi
+        fi
+    done < <(git -C "$project_root" worktree list --porcelain 2>/dev/null || true)
+    
+    return 1
+}
+
+# Get all specs from centralized location
+# Output: project\tfeature\tspec_path\tbranch_from_index
+get_centralized_specs() {
+    local workspace_root
+    if ! workspace_root=$(get_workspace_root 2>/dev/null); then
+        return 1
+    fi
+    
+    local specs_dir
+    specs_dir=$(get_specs_dir)
+    
+    [[ -d "$specs_dir" ]] || return 0
+    
+    for project_dir in "$specs_dir"/*/; do
+        [[ -d "$project_dir" ]] || continue
+        local project
+        project=$(basename "$project_dir")
+        
+        for feature_dir in "$project_dir"/*/; do
+            [[ -d "$feature_dir" ]] || continue
+            local feature
+            feature=$(basename "$feature_dir")
+            [[ "$feature" == "*" ]] && continue
+            
+            # Get branch from index if available
+            local index_json="$workspace_root/.specify/specs-index.json"
+            local branch="main"
+            if [[ -f "$index_json" ]] && command -v jq >/dev/null 2>&1; then
+                local indexed_branch
+                indexed_branch=$(jq -r ".specs[] | select(.project == \"$project\" and .feature == \"$feature\") | .branch" "$index_json" 2>/dev/null || echo "")
+                [[ -n "$indexed_branch" && "$indexed_branch" != "null" ]] && branch="$indexed_branch"
+            fi
+            
+            printf '%s\t%s\t%s\t%s\n' "$project" "$feature" "$feature_dir" "$branch"
+        done
+    done
+}
+
+# Get all specs from distributed locations (inside project repos)
+# Output: project\tfeature\tspec_path\tbranch_from_index\tdistributed_path
+get_distributed_specs() {
+    local workspace_root
+    if ! workspace_root=$(get_workspace_root 2>/dev/null); then
+        return 1
+    fi
+    
+    local index_json="$workspace_root/.specify/specs-index.json"
+    local centralized_specs_dir
+    centralized_specs_dir=$(get_specs_dir)
+    
+    for project_dir in "$workspace_root"/*/; do
+        [[ -d "$project_dir" ]] || continue
+        local project
+        project=$(basename "$project_dir")
+        
+        # Skip non-project directories
+        case "$project" in
+            node_modules|.git|.specify|.opencode|specs|__pycache__|.venv|venv|scripts|templates|memory|docs|media|.*|.claude|.cursor|.github)
+                continue
+                ;;
+        esac
+        
+        # Skip git worktrees (they're clones of main repos, specs there are duplicates)
+        if [[ -f "$project_dir/.git" ]]; then
+            local git_content
+            git_content=$(cat "$project_dir/.git" 2>/dev/null || echo "")
+            if [[ "$git_content" == gitdir:* ]]; then
+                continue
+            fi
+        fi
+        
+        # Check for .specify/specs inside project
+        local project_specs=""
+        if [[ -d "$project_dir/.specify/specs" ]]; then
+            project_specs="$project_dir/.specify/specs"
+        elif [[ -d "$project_dir/specs" ]]; then
+            # Only count as distributed if it's NOT the centralized location
+            if [[ "$project_dir/specs" != "$centralized_specs_dir" ]]; then
+                project_specs="$project_dir/specs"
+            fi
+        fi
+        
+        [[ -z "$project_specs" || ! -d "$project_specs" ]] && continue
+        
+        for feature_dir in "$project_specs"/*/; do
+            [[ -d "$feature_dir" ]] || continue
+            local feature
+            feature=$(basename "$feature_dir")
+            [[ "$feature" == "*" ]] && continue
+            
+            # Get branch from index if available
+            local branch="main"
+            if [[ -f "$index_json" ]] && command -v jq >/dev/null 2>&1; then
+                local indexed_branch
+                indexed_branch=$(jq -r ".specs[] | select(.project == \"$project\" and .feature == \"$feature\") | .branch" "$index_json" 2>/dev/null || echo "")
+                [[ -n "$indexed_branch" && "$indexed_branch" != "null" ]] && branch="$indexed_branch"
+            fi
+            
+            printf '%s\t%s\t%s\t%s\t%s\n' "$project" "$feature" "$feature_dir" "$branch" "$project_specs"
+        done
+    done
+}
+
+# Audit a single spec for 1-1-1 alignment
+# Global variable to track fetched repos (set AUDIT_SKIP_FETCH=true to skip all fetches)
+declare -A _AUDIT_FETCHED_REPOS 2>/dev/null || true
+
+# Usage: audit_spec_alignment "project" "feature" "spec_path" ["is_distributed"]
+# Output: status\tdetails\texpected_branch\texpected_worktree\texpected_spec_path
+audit_spec_alignment() {
+    local project="$1"
+    local feature="$2"
+    local spec_path="$3"
+    local is_distributed="${4:-false}"
+    
+    local workspace_root
+    workspace_root=$(get_workspace_root)
+    local project_root="$workspace_root/$project"
+    
+    # Determine expected branch name
+    local branch_prefix
+    branch_prefix=$(get_workspace_config "branch_naming.include_project_prefix" "true")
+    local expected_branch
+    if [[ "$branch_prefix" == "true" ]]; then
+        expected_branch="${project}-${feature}"
+    else
+        expected_branch="${feature}"
+    fi
+    
+    # Expected worktree path
+    local worktree_base
+    worktree_base=$(get_workspace_config "worktrees.base_dir" "$workspace_root")
+    local expected_worktree="$worktree_base/${project}-${feature}"
+    
+    # Expected centralized spec path
+    local specs_dir
+    specs_dir=$(get_specs_dir)
+    local expected_spec_path="$specs_dir/$project/$feature"
+    
+    # Check conditions
+    local branch_found=false
+    local worktree_found=false
+    local worktree_path=""
+    local was_merged=false
+    
+    # Check if project repo exists
+    if [[ ! -d "$project_root" ]] || ! git -C "$project_root" rev-parse --git-dir >/dev/null 2>&1; then
+        # Try to find main worktree from any existing worktree
+        for wt_dir in "$workspace_root"/${project}-*/; do
+            if [[ -d "$wt_dir" ]] && git -C "$wt_dir" rev-parse --git-dir >/dev/null 2>&1; then
+                local common_dir
+                common_dir=$(git -C "$wt_dir" rev-parse --git-common-dir 2>/dev/null)
+                project_root="${common_dir%/.git}"
+                break
+            fi
+        done
+    fi
+    
+    if [[ -d "$project_root" ]] && git -C "$project_root" rev-parse --git-dir >/dev/null 2>&1; then
+        # Fetch only once per repo (skip if AUDIT_SKIP_FETCH is set)
+        if [[ "${AUDIT_SKIP_FETCH:-false}" != "true" ]]; then
+            local repo_id
+            repo_id=$(git -C "$project_root" rev-parse --git-common-dir 2>/dev/null || echo "$project_root")
+            if [[ -z "${_AUDIT_FETCHED_REPOS[$repo_id]:-}" ]]; then
+                git -C "$project_root" fetch --all --prune >/dev/null 2>&1 || true
+                _AUDIT_FETCHED_REPOS[$repo_id]=1
+            fi
+        fi
+        
+        # Check branch
+        if branch_exists "$project_root" "$expected_branch"; then
+            branch_found=true
+        fi
+        
+        # Check worktree
+        if worktree_path=$(worktree_exists "$project_root" "$expected_branch"); then
+            worktree_found=true
+        fi
+        
+        # Check if merged (only if branch not found)
+        if ! $branch_found; then
+            if was_feature_merged "$project_root" "$expected_branch" "$feature"; then
+                was_merged=true
+            fi
+        fi
+    fi
+    
+    # Determine status
+    local status=""
+    local details=""
+    
+    if [[ "$is_distributed" == "true" ]]; then
+        # Distributed spec - needs migration
+        status="$ALIGN_DISTRIBUTED"
+        details="Spec at $spec_path should be at $expected_spec_path"
+    elif $was_merged; then
+        # Feature was merged - not an error
+        status="$ALIGN_MERGED"
+        details="Feature merged to main/dev, branch deleted"
+    elif $branch_found && $worktree_found; then
+        # All aligned
+        status="$ALIGN_OK"
+        details="Branch: $expected_branch, Worktree: $worktree_path"
+    elif ! $branch_found && ! $worktree_found; then
+        # Orphan spec
+        status="$ALIGN_ORPHAN_SPEC"
+        details="No branch or worktree found for $expected_branch"
+    elif $branch_found && ! $worktree_found; then
+        # Missing worktree
+        status="$ALIGN_MISSING_WORKTREE"
+        details="Branch exists but no worktree at $expected_worktree"
+    else
+        # Should not reach here, but handle edge case
+        status="$ALIGN_OK"
+        details="Partial alignment"
+    fi
+    
+    printf '%s\t%s\t%s\t%s\t%s\n' "$status" "$details" "$expected_branch" "$expected_worktree" "$expected_spec_path"
+}
+
+# Run full workspace audit
+# Output: project\tfeature\tstatus\tdetails\tspec_path\texpected_spec_path
+run_workspace_audit() {
+    local workspace_root
+    if ! workspace_root=$(get_workspace_root 2>/dev/null); then
+        echo "ERROR: Not in a workspace" >&2
+        return 1
+    fi
+    
+    local strategy
+    strategy=$(get_workspace_config "spec_strategy" "centralized")
+    
+    # Audit centralized specs
+    while IFS=$'\t' read -r project feature spec_path branch; do
+        [[ -z "$project" ]] && continue
+        
+        local audit_result
+        audit_result=$(audit_spec_alignment "$project" "$feature" "$spec_path" "false")
+        
+        IFS=$'\t' read -r status details expected_branch expected_worktree expected_spec_path <<< "$audit_result"
+        
+        printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$project" "$feature" "$status" "$details" "$spec_path" "$expected_spec_path"
+    done < <(get_centralized_specs)
+    
+    # Audit distributed specs (if strategy is centralized, these need migration)
+    if [[ "$strategy" == "centralized" ]]; then
+        while IFS=$'\t' read -r project feature spec_path branch distributed_path; do
+            [[ -z "$project" ]] && continue
+            
+            local audit_result
+            audit_result=$(audit_spec_alignment "$project" "$feature" "$spec_path" "true")
+            
+            IFS=$'\t' read -r status details expected_branch expected_worktree expected_spec_path <<< "$audit_result"
+            
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$project" "$feature" "$status" "$details" "$spec_path" "$expected_spec_path"
+        done < <(get_distributed_specs)
+    fi
+}
+
+# Create a worktree for a feature
+# Usage: create_feature_worktree "project" "feature" "base_branch"
+create_feature_worktree() {
+    local project="$1"
+    local feature="$2"
+    local base_branch="${3:-main}"
+    
+    local workspace_root
+    workspace_root=$(get_workspace_root)
+    local project_root="$workspace_root/$project"
+    
+    # Determine branch name
+    local branch_prefix
+    branch_prefix=$(get_workspace_config "branch_naming.include_project_prefix" "true")
+    local branch_name
+    if [[ "$branch_prefix" == "true" ]]; then
+        branch_name="${project}-${feature}"
+    else
+        branch_name="${feature}"
+    fi
+    
+    # Determine worktree path
+    local worktree_base
+    worktree_base=$(get_workspace_config "worktrees.base_dir" "$workspace_root")
+    local worktree_path="$worktree_base/${project}-${feature}"
+    
+    # Verify project exists
+    if [[ ! -d "$project_root" ]] || ! git -C "$project_root" rev-parse --git-dir >/dev/null 2>&1; then
+        echo "ERROR: Project root not found or not a git repo: $project_root" >&2
+        return 1
+    fi
+    
+    # Check if branch exists, create if not
+    if ! branch_exists "$project_root" "$branch_name"; then
+        echo "Creating branch $branch_name from $base_branch..."
+        if ! git -C "$project_root" branch "$branch_name" "origin/$base_branch" 2>/dev/null; then
+            if ! git -C "$project_root" branch "$branch_name" "$base_branch" 2>/dev/null; then
+                echo "ERROR: Failed to create branch $branch_name" >&2
+                return 1
+            fi
+        fi
+    fi
+    
+    # Create worktree
+    if [[ -d "$worktree_path" ]]; then
+        echo "Worktree already exists: $worktree_path"
+        return 0
+    fi
+    
+    echo "Creating worktree at $worktree_path..."
+    if ! git -C "$project_root" worktree add "$worktree_path" "$branch_name" 2>&1; then
+        echo "ERROR: Failed to create worktree" >&2
+        return 1
+    fi
+    
+    echo "Created worktree: $worktree_path"
+    return 0
+}
+
+# Migrate a spec from distributed to centralized location
+# Usage: migrate_spec_to_centralized "project" "feature" "source_path"
+migrate_spec_to_centralized() {
+    local project="$1"
+    local feature="$2"
+    local source_path="$3"
+    local dry_run="${4:-true}"
+    
+    local workspace_root
+    workspace_root=$(get_workspace_root)
+    local specs_dir
+    specs_dir=$(get_specs_dir)
+    local target_path="$specs_dir/$project/$feature"
+    
+    # Validate source exists
+    if [[ ! -d "$source_path" ]]; then
+        echo "ERROR: Source spec path not found: $source_path" >&2
+        return 1
+    fi
+    
+    if [[ "$dry_run" == "true" ]]; then
+        echo "[DRY-RUN] Would migrate:"
+        echo "  From: $source_path"
+        echo "  To:   $target_path"
+        return 0
+    fi
+    
+    # Create target directory
+    mkdir -p "$(dirname "$target_path")"
+    
+    # Move the spec directory
+    if [[ -d "$target_path" ]]; then
+        echo "WARNING: Target already exists, merging..."
+        cp -r "$source_path"/* "$target_path"/ 2>/dev/null || true
+        rm -rf "$source_path"
+    else
+        mv "$source_path" "$target_path"
+    fi
+    
+    echo "Migrated: $source_path -> $target_path"
+    return 0
+}
+
+# =============================================================================
+# FEATURE NUMBER GENERATION
+# =============================================================================
+
 # Get next feature number across entire workspace (for centralized specs)
 get_next_workspace_feature_number() {
     local project="$1"

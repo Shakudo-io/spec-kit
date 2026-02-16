@@ -280,6 +280,8 @@ Commands for managing specs across multiple repositories in a workspace:
 | `/speckit.specs`    | List all specs in the workspace with status (spec/plan/tasks)         |
 | `/speckit.projects` | List all projects in the workspace with git info                      |
 | `/speckit.archive`  | Archive or unarchive a project to hide it from workspace listings     |
+| `/speckit.audit`    | Audit 1-1-1 alignment (branch ↔ worktree ↔ spec folder consistency)   |
+| `/speckit.migrate`  | Fix alignment issues by moving distributed specs to centralized location |
 
 **Workspace mode** allows you to manage specifications across multiple repositories from a single location. See [Multi-Repository Workspaces](#multi-repository-workspaces) for details.
 
@@ -709,6 +711,10 @@ This creates the spec in the correct project directory and updates the workspace
 | `/speckit.archive <project>` | Archive a project (hide from listings) |
 | `/speckit.archive --unarchive <project>` | Unarchive a project |
 | `/speckit.archive --list` | List all archived projects |
+| `/speckit.audit` | Audit 1-1-1 alignment across all specs |
+| `/speckit.audit --no-fetch` | Skip git fetch for faster execution |
+| `/speckit.migrate --all` | Preview migrations for distributed specs |
+| `/speckit.migrate --all --execute` | Execute migrations to centralized location |
 | `--force-refresh` | Force index regeneration |
 | `--include-worktrees` | Include git worktrees (disabled by default to avoid duplicates) |
 
@@ -723,6 +729,43 @@ This creates the spec in the correct project directory and updates the workspace
 ### Worktree Handling
 
 By default, workspace rollup deduplicates git worktrees to avoid indexing the same repository multiple times. Use `--include-worktrees` to include all worktrees if needed.
+
+### 1-1-1 Alignment (Branch ↔ Worktree ↔ Spec)
+
+Spec Kit enforces a **1-1-1 invariant**: every feature should have exactly ONE branch, ONE worktree, and ONE spec folder with matching names.
+
+| Artifact | Naming Pattern | Example |
+|----------|----------------|---------|
+| **Branch** | `{project}-{NNN}-{feature}` | `backend-api-001-user-auth` |
+| **Worktree** | `{workspace_root}/{project}-{NNN}-{feature}/` | `/workspace/backend-api-001-user-auth/` |
+| **Spec folder** | `{specs_dir}/{project}/{NNN}-{feature}/` | `/workspace/specs/backend-api/001-user-auth/` |
+
+#### Auditing Alignment
+
+Use `/speckit.audit` to check for alignment issues:
+
+```bash
+/speckit.audit              # Full audit with git fetch
+/speckit.audit --no-fetch   # Skip fetch for faster execution
+```
+
+The audit detects:
+- **OK** - Branch, worktree, and spec folder all exist and align
+- **Merged** - Feature was merged (branch deleted, no worktree)
+- **Orphan** - Spec exists but no branch/worktree found
+- **Missing Worktree** - Branch exists but worktree is missing
+- **Distributed** - Spec is inside a project repo instead of centralized location
+
+#### Fixing Alignment Issues
+
+Use `/speckit.migrate` to fix distributed specs:
+
+```bash
+/speckit.migrate --all           # Preview what would be migrated
+/speckit.migrate --all --execute # Actually move the specs
+```
+
+For orphan/missing-worktree issues, manual review is recommended to determine whether to create the missing artifacts or archive the spec.
 
 ---
 
