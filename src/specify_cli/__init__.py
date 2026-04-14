@@ -1315,11 +1315,11 @@ def download_workspace_scripts(scripts_dir: Path, script_type: str = "sh", track
     scripts = WORKSPACE_SCRIPTS.get(script_type, WORKSPACE_SCRIPTS["sh"])
     
     # Try sources in order of preference:
-    # 1. Upstream github/spec-kit (public, always accessible)
-    # 2. Shakudo fork (may be private, requires auth)
+    # 1. Shakudo fork (matches the workspace docs/commands shipped by this CLI)
+    # 2. Upstream github/spec-kit (fallback if the fork is unavailable)
     SOURCES = [
-        ("github", "spec-kit", "main"),      # Upstream - public
-        ("Shakudo-io", "spec-kit", "main"),  # Fork - may need auth
+        ("Shakudo-io", "spec-kit", "main"),  # Preferred fork for workspace-specific helpers
+        ("github", "spec-kit", "main"),      # Upstream fallback
     ]
     
     copied = 0
