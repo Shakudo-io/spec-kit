@@ -275,7 +275,7 @@ if $LIST_PROJECTS_DETAILED; then
     if $JSON_MODE; then
         printf '{"workspace_root":"%s","projects":[' "$workspace_root"
         first=true
-        while IFS=$'\t' read -r name has_git remote_url branch is_worktree main_worktree; do
+        while IFS="$SPECIFY_INTERNAL_FIELD_SEPARATOR" read -r name has_git remote_url branch is_worktree main_worktree; do
             if $first; then
                 first=false
             else
@@ -290,7 +290,7 @@ if $LIST_PROJECTS_DETAILED; then
         echo ""
         printf "%-40s %-8s %-10s %-20s %s\n" "PROJECT" "GIT" "WORKTREE" "BRANCH" "REMOTE"
         printf "%-40s %-8s %-10s %-20s %s\n" "-------" "---" "--------" "------" "------"
-        while IFS=$'\t' read -r name has_git remote_url branch is_worktree main_worktree; do
+        while IFS="$SPECIFY_INTERNAL_FIELD_SEPARATOR" read -r name has_git remote_url branch is_worktree main_worktree; do
             git_status="no"
             wt_status="-"
             br="$branch"
