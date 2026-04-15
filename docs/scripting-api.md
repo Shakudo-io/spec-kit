@@ -109,11 +109,11 @@ done
 
 ### `list_projects_detailed`
 
-List projects with git metadata. Returns tab-separated values.
+List projects with git metadata. Raw records use `SPECIFY_INTERNAL_FIELD_SEPARATOR` (ASCII unit separator) so empty metadata fields stay aligned.
 
 ```bash
 # Fields: name, has_git, remote_url, branch, is_worktree, main_worktree
-while IFS=$'\t' read -r name has_git remote_url branch is_worktree main_worktree; do
+while IFS="$SPECIFY_INTERNAL_FIELD_SEPARATOR" read -r name has_git remote_url branch is_worktree main_worktree; do
     echo "$name: branch=$branch, git=$has_git"
 done < <(list_projects_detailed)
 
