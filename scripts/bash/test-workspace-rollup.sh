@@ -76,10 +76,10 @@ shorthand_result=$(parse_feature_shorthand "$sample_spec_id" 2>&1)
 echo "$shorthand_result" | grep -q "SHORTHAND_PROJECT='$sample_project'" && pass "parse_feature_shorthand() parses project:feature" || fail "parse_feature_shorthand()" "Parse failed"
 
 feature_output=$("$CHECK_PREREQUISITES" --feature "$sample_spec_id" --json 2>&1)
-echo "$feature_output" | jq -e '.FEATURE_DIR' >/dev/null 2>&1 && pass "--feature resolves project:feature" || fail "--feature resolve" "No FEATURE_DIR"
+echo "$feature_output" | jq -e '.SPEC_DIR and .SOURCE_DIR' >/dev/null 2>&1 && pass "--feature resolves project:feature" || fail "--feature resolve" "Missing SPEC_DIR/SOURCE_DIR"
 
-feature_dir=$(echo "$feature_output" | jq -r '.FEATURE_DIR' 2>/dev/null)
-[[ -f "$feature_dir/spec.md" ]] && pass "Resolved FEATURE_DIR contains spec.md" || fail "FEATURE_DIR has spec.md" "Missing"
+spec_dir=$(echo "$feature_output" | jq -r '.SPEC_DIR' 2>/dev/null)
+[[ -f "$spec_dir/spec.md" ]] && pass "Resolved SPEC_DIR contains spec.md" || fail "SPEC_DIR has spec.md" "Missing"
 
 # =============================================================================
 section "4. AUTO-REFRESH TESTS"
