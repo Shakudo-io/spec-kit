@@ -7,6 +7,12 @@ All notable changes to the Specify CLI and templates are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.26] - 2026-04-14
+
+### Fixed
+
+- **Workspace script source preference**: `specify workspace --here` now prefers downloading workspace helpers from `Shakudo-io/spec-kit` before falling back to upstream `github/spec-kit`. This keeps generated `.specify/scripts/bash/check-prerequisites.sh` aligned with the fork-specific workspace docs and restores `--rollup` support in newly downloaded workspace helpers.
+
 ## [0.0.25] - 2026-01-16
 
 ### Added

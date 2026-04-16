@@ -3,10 +3,11 @@
 # All tests are non-destructive (read-only operations)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CHECK_PREREQUISITES="$SCRIPT_DIR/check-prerequisites.sh"
 WORKSPACE_ROOT="/root/gitrepos"
 cd "$WORKSPACE_ROOT"
 
-source "$SCRIPT_DIR/scripts/bash/common.sh"
+source "$SCRIPT_DIR/common.sh"
 
 PASSED=0
 FAILED=0
@@ -19,7 +20,7 @@ section() { echo -e "\n═══════════════════
 section "1. ROLLUP COMMAND TESTS"
 # =============================================================================
 
-output=$("$SCRIPT_DIR/scripts/bash/check-prerequisites.sh" --rollup 2>&1)
+output=$("$CHECK_PREREQUISITES" --rollup 2>&1)
 if [[ -f "$WORKSPACE_ROOT/.specify/specs-index.json" ]] && [[ -f "$WORKSPACE_ROOT/.specify/specs-index.md" ]]; then
     pass "--rollup generates index files"
 else
@@ -27,23 +28,23 @@ else
 fi
 echo "$output" | grep -q "Specs indexed:" && pass "--rollup shows spec count" || fail "--rollup shows spec count" "Missing count"
 
-json_output=$("$SCRIPT_DIR/scripts/bash/check-prerequisites.sh" --rollup --json 2>&1)
+json_output=$("$CHECK_PREREQUISITES" --rollup --json 2>&1)
 echo "$json_output" | jq . >/dev/null 2>&1 && pass "--rollup --json is valid JSON" || fail "--rollup --json is valid JSON" "Parse error"
 echo "$json_output" | jq -e '.version and .workspace_root and .spec_count and .specs' >/dev/null 2>&1 && pass "--rollup JSON has required fields" || fail "--rollup JSON has required fields" "Missing fields"
 
 count1=$(echo "$json_output" | jq -r '.spec_count')
-count2=$("$SCRIPT_DIR/scripts/bash/check-prerequisites.sh" --rollup --json 2>&1 | jq -r '.spec_count')
+count2=$("$CHECK_PREREQUISITES" --rollup --json 2>&1 | jq -r '.spec_count')
 [[ "$count1" == "$count2" ]] && pass "Rollup is idempotent (count: $count1)" || fail "Rollup idempotent" "$count1 vs $count2"
 
 # =============================================================================
 section "2. SPECS LISTING TESTS"
 # =============================================================================
 
-list_output=$("$SCRIPT_DIR/scripts/bash/check-prerequisites.sh" --list-specs 2>&1)
+list_output=$("$CHECK_PREREQUISITES" --list-specs 2>&1)
 echo "$list_output" | grep -q "PROJECT.*FEATURE.*SPEC" && pass "--list-specs shows table header" || fail "--list-specs table header" "Missing"
 echo "$list_output" | grep -q "monorepo" && pass "--list-specs shows projects" || fail "--list-specs shows projects" "Missing"
 
-list_json=$("$SCRIPT_DIR/scripts/bash/check-prerequisites.sh" --list-specs --json 2>&1)
+list_json=$("$CHECK_PREREQUISITES" --list-specs --json 2>&1)
 echo "$list_json" | jq . >/dev/null 2>&1 && pass "--list-specs --json is valid JSON" || fail "--list-specs --json valid" "Parse error"
 echo "$list_json" | jq -e '.specs[0].id and .specs[0].project and .specs[0].feature' >/dev/null 2>&1 && pass "Spec entries have required fields" || fail "Spec entries fields" "Missing"
 
@@ -51,20 +52,30 @@ rollup_count=$(echo "$json_output" | jq -r '.spec_count')
 list_count=$(echo "$list_json" | jq -r '.specs | length')
 [[ "$rollup_count" == "$list_count" ]] && pass "Spec count consistent ($rollup_count)" || fail "Spec count consistent" "$rollup_count vs $list_count"
 
+sample_spec_id=$(echo "$list_json" | jq -r '.specs[] | select(.has_spec == true) | .id' | head -n1)
+sample_project=$(echo "$list_json" | jq -r '.specs[] | select(.has_spec == true) | .project' | head -n1)
+if [[ -n "$sample_spec_id" && "$sample_spec_id" != "null" ]]; then
+    pass "Sample spec fixture selected ($sample_spec_id)"
+else
+    fail "Sample spec fixture selected" "No spec entries with spec.md in current workspace"
+    sample_spec_id=$(echo "$list_json" | jq -r '.specs[0].id')
+    sample_project=$(echo "$list_json" | jq -r '.specs[0].project')
+fi
+
 # =============================================================================
 section "3. PROJECT:FEATURE RESOLUTION TESTS"
 # =============================================================================
 
-resolved=$(resolve_spec_path "monorepo:001-toybox-arcade" 2>&1)
+resolved=$(resolve_spec_path "$sample_spec_id" 2>&1)
 [[ -d "$resolved" ]] && pass "resolve_spec_path() returns valid dir" || fail "resolve_spec_path() valid dir" "$resolved"
 
 invalid_result=$(resolve_spec_path "nonexistent:fake-feature" 2>&1)
 echo "$invalid_result" | grep -qi "error\|not found" && pass "resolve_spec_path() errors on invalid spec" || fail "resolve_spec_path() error" "No error"
 
-shorthand_result=$(parse_feature_shorthand "business-automation:001-recruit-v2-python-tui" 2>&1)
-echo "$shorthand_result" | grep -q "SHORTHAND_PROJECT='business-automation'" && pass "parse_feature_shorthand() parses project:feature" || fail "parse_feature_shorthand()" "Parse failed"
+shorthand_result=$(parse_feature_shorthand "$sample_spec_id" 2>&1)
+echo "$shorthand_result" | grep -q "SHORTHAND_PROJECT='$sample_project'" && pass "parse_feature_shorthand() parses project:feature" || fail "parse_feature_shorthand()" "Parse failed"
 
-feature_output=$("$SCRIPT_DIR/scripts/bash/check-prerequisites.sh" --feature "monorepo:001-toybox-arcade" --json 2>&1)
+feature_output=$("$CHECK_PREREQUISITES" --feature "$sample_spec_id" --json 2>&1)
 echo "$feature_output" | jq -e '.FEATURE_DIR' >/dev/null 2>&1 && pass "--feature resolves project:feature" || fail "--feature resolve" "No FEATURE_DIR"
 
 feature_dir=$(echo "$feature_output" | jq -r '.FEATURE_DIR' 2>/dev/null)
@@ -76,7 +87,7 @@ section "4. AUTO-REFRESH TESTS"
 
 cp "$WORKSPACE_ROOT/.specify/specs-index.json" "/tmp/specs-index-backup.json"
 rm -f "$WORKSPACE_ROOT/.specify/specs-index.json"
-resolve_spec_path "monorepo:001-toybox-arcade" >/dev/null 2>&1
+resolve_spec_path "$sample_spec_id" >/dev/null 2>&1
 [[ -f "$WORKSPACE_ROOT/.specify/specs-index.json" ]] && pass "Auto-refresh creates missing index" || { fail "Auto-refresh missing index" "Not created"; cp "/tmp/specs-index-backup.json" "$WORKSPACE_ROOT/.specify/specs-index.json"; }
 
 # =============================================================================
@@ -85,7 +96,7 @@ section "5. FORCE REFRESH TESTS"
 
 before_time=$(stat -c %Y "$WORKSPACE_ROOT/.specify/specs-index.json" 2>/dev/null)
 sleep 1
-"$SCRIPT_DIR/scripts/bash/check-prerequisites.sh" --list-specs --force-refresh >/dev/null 2>&1
+"$CHECK_PREREQUISITES" --list-specs --force-refresh >/dev/null 2>&1
 after_time=$(stat -c %Y "$WORKSPACE_ROOT/.specify/specs-index.json" 2>/dev/null)
 [[ "$after_time" -ge "$before_time" ]] && pass "--force-refresh accepted" || fail "--force-refresh" "Failed"
 
@@ -93,31 +104,26 @@ after_time=$(stat -c %Y "$WORKSPACE_ROOT/.specify/specs-index.json" 2>/dev/null)
 section "6. WORKTREE DEDUPLICATION TESTS"
 # =============================================================================
 
-rollup_json=$("$SCRIPT_DIR/scripts/bash/check-prerequisites.sh" --rollup --json 2>&1)
+rollup_json=$("$CHECK_PREREQUISITES" --rollup --json 2>&1)
 worktree_specs=$(echo "$rollup_json" | jq '[.specs[] | select(.is_worktree == true)] | length' 2>/dev/null)
 [[ "$worktree_specs" == "0" ]] && pass "Default rollup deduplicates worktrees (0 worktree specs)" || pass "Rollup has $worktree_specs worktree specs"
 
-include_output=$("$SCRIPT_DIR/scripts/bash/check-prerequisites.sh" --rollup --include-worktrees --json 2>&1)
+include_output=$("$CHECK_PREREQUISITES" --rollup --include-worktrees --json 2>&1)
 echo "$include_output" | jq . >/dev/null 2>&1 && pass "--include-worktrees returns valid JSON" || fail "--include-worktrees" "Invalid JSON"
 
 echo "$rollup_json" | jq -e '.specs[0].is_worktree != null' >/dev/null 2>&1 && pass "Specs have is_worktree field" || fail "is_worktree field" "Missing"
+echo "$rollup_json" | jq -e 'all(.specs[]; (.repo_url | type) == "string" and (.branch | type) == "string" and (.is_worktree | type) == "boolean")' >/dev/null 2>&1 && pass "Rollup spec metadata keeps expected JSON types" || fail "Rollup spec metadata types" "Unexpected repo/branch/worktree types"
 
 # =============================================================================
 section "7. BACKWARD COMPATIBILITY TESTS"
 # =============================================================================
 
-projects_output=$("$SCRIPT_DIR/scripts/bash/check-prerequisites.sh" --list-projects 2>&1)
+projects_output=$("$CHECK_PREREQUISITES" --list-projects 2>&1)
 [[ -n "$projects_output" ]] && ! echo "$projects_output" | grep -qi "error" && pass "--list-projects works" || fail "--list-projects" "Error"
 
-# Note: --list-projects-detailed may have invalid JSON for edge-case projects (pre-existing bug)
-detailed_output=$("$SCRIPT_DIR/scripts/bash/check-prerequisites.sh" --list-projects-detailed --json 2>&1)
-if echo "$detailed_output" | jq -e '.projects' >/dev/null 2>&1; then
-    pass "--list-projects-detailed --json works"
-else
-    # Known issue: some projects with git detection issues produce invalid JSON
-    echo "  ⚠ --list-projects-detailed --json has edge-case issues (pre-existing bug)"
-    ((PASSED++))  # Count as pass since this is a known pre-existing issue
-fi
+detailed_output=$("$CHECK_PREREQUISITES" --list-projects-detailed --json 2>&1)
+echo "$detailed_output" | jq -e '.projects' >/dev/null 2>&1 && pass "--list-projects-detailed --json works" || fail "--list-projects-detailed --json works" "Parse error"
+echo "$detailed_output" | jq -e 'all(.projects[]; (.name | type) == "string" and (.has_git | type) == "boolean" and (.remote_url | type) == "string" and (.branch | type) == "string" and (.is_worktree | type) == "boolean" and (.main_worktree | type) == "string")' >/dev/null 2>&1 && pass "Detailed project metadata keeps expected JSON types" || fail "Detailed project metadata types" "Unexpected field types"
 
 is_workspace_mode && pass "is_workspace_mode() returns true" || fail "is_workspace_mode()" "False"
 
@@ -129,7 +135,7 @@ section "8. JSON OUTPUT VALIDATION"
 # =============================================================================
 
 for cmd in "--rollup --json" "--list-specs --json" "--list-projects --json"; do
-    output=$("$SCRIPT_DIR/scripts/bash/check-prerequisites.sh" $cmd 2>&1)
+    output=$("$CHECK_PREREQUISITES" $cmd 2>&1)
     echo "$output" | jq . >/dev/null 2>&1 && pass "Valid JSON: $cmd" || fail "Valid JSON: $cmd" "Parse error"
 done
 
