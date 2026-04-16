@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Workspace script source preference**: `specify workspace --here` now prefers downloading workspace helpers from `Shakudo-io/spec-kit` before falling back to upstream `github/spec-kit`. This keeps generated `.specify/scripts/bash/check-prerequisites.sh` aligned with the fork-specific workspace docs and restores `--rollup` support in newly downloaded workspace helpers.
+- **Workspace rollup JSON alignment**: internal bash record transport now preserves empty metadata fields when generating workspace rollup and detailed project JSON output. This prevents malformed entries such as `"is_worktree":,` and keeps `repo_url`, `branch`, and `is_worktree` typed correctly for downstream `jq` consumers.
 
 ## [0.0.25] - 2026-01-16
 
