@@ -6,6 +6,22 @@
 # WORKSPACE DETECTION
 # =============================================================================
 
+# Internal field separator for shell record transport. Use a non-whitespace separator
+# so `read` preserves empty metadata fields (for example missing repo URLs).
+SPECIFY_INTERNAL_FIELD_SEPARATOR=${SPECIFY_INTERNAL_FIELD_SEPARATOR:-$'\x1f'}
+
+emit_internal_record() {
+    local field
+    local separator=""
+
+    for field in "$@"; do
+        printf '%s%s' "$separator" "$field"
+        separator="$SPECIFY_INTERNAL_FIELD_SEPARATOR"
+    done
+
+    printf '\n'
+}
+
 # Find workspace root by looking for workspace.yaml upward
 # Supports both scripts/bash/workspace.yaml (spec-kit structure) and .specify/workspace.yaml (installed)
 get_workspace_root() {
@@ -318,6 +334,7 @@ list_projects() {
 
 # List projects with detailed git information (repo URL, branch, worktree info)
 # Usage: list_projects_detailed [--include-archived]
+# Output fields are separated by SPECIFY_INTERNAL_FIELD_SEPARATOR so empty values survive round-trips.
 list_projects_detailed() {
     local include_archived=false
     if [[ "${1:-}" == "--include-archived" ]]; then
@@ -370,7 +387,7 @@ list_projects_detailed() {
                 fi
             fi
             
-            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$has_git" "$remote_url" "$branch" "$is_worktree" "$main_worktree"
+            emit_internal_record "$name" "$has_git" "$remote_url" "$branch" "$is_worktree" "$main_worktree"
         fi
     done
 }
@@ -432,7 +449,9 @@ scan_project_for_specs() {
 }
 
 # Scan entire workspace for specs with worktree deduplication
-# Output: project_name, feature_name, spec_path, has_spec, has_plan, has_tasks, last_modified, repo_url, branch, is_worktree
+# Output fields are separated by SPECIFY_INTERNAL_FIELD_SEPARATOR:
+#   project_name, feature_name, spec_path, has_spec, has_plan, has_tasks,
+#   last_modified, repo_url, branch, is_worktree
 scan_workspace_specs() {
     local workspace_root
     local include_worktrees="${1:-false}"
@@ -503,7 +522,7 @@ scan_workspace_specs() {
                     fi
                     
                     seen_specs["${project_name}:${feature_name}"]="1"
-                    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                    emit_internal_record \
                         "$project_name" "$feature_name" "$spec_path" "$has_spec" "$has_plan" "$has_tasks" "$last_modified" "$repo_url" "$branch" "$is_worktree"
                 done
             done
@@ -559,7 +578,7 @@ scan_workspace_specs() {
                 continue
             fi
             seen_specs[$spec_key]="1"
-            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            emit_internal_record \
                 "$project_name" "$feature_name" "$spec_path" "$has_spec" "$has_plan" "$has_tasks" "$last_modified" "$repo_url" "$branch" "$is_worktree"
         done < <(scan_project_for_specs "$dir")
     done
@@ -592,7 +611,7 @@ generate_specs_index() {
     local spec_count=0
     local first=true
     
-    while IFS=$'\t' read -r project feature spec_path has_spec has_plan has_tasks last_modified repo_url branch is_worktree; do
+    while IFS="$SPECIFY_INTERNAL_FIELD_SEPARATOR" read -r project feature spec_path has_spec has_plan has_tasks last_modified repo_url branch is_worktree; do
         [[ -z "$project" ]] && continue
         
         local id="${project}:${feature}"
